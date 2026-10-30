@@ -41,17 +41,17 @@ export class LevelSelectScene extends Phaser.Scene {
       return { btn, stars };
     });
 
-    const endlessOpen = save.unlocked > CAMPAIGN_LENGTH;
+    // Endless is open from the start and keeps its own progress.
     const endless = new Button(this, {
       x: 0,
       y: 0,
-      texture: endlessOpen ? 'btn_pink' : 'btn_blue',
+      texture: 'btn_pink',
       width: 420,
       height: 100,
-      label: endlessOpen ? `Endless  ${save.unlocked - CAMPAIGN_LENGTH}` : 'Endless (clear 30)',
+      label: `Endless  ${save.endless}`,
       fontSize: 36,
-      onClick: () => (endlessOpen ? this.go('Game', { level: save.unlocked }) : services.audio.play('invalid')),
-    }).setAlpha(endlessOpen ? 1 : 0.6);
+      onClick: () => this.go('Game', { level: CAMPAIGN_LENGTH + services.save.get().endless }),
+    });
 
     onLayout(this, (w, h) => {
       const ins = safeInsets(this);

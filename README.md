@@ -11,7 +11,7 @@ Cơ chế chơi được xây dựng theo video tham chiếu (màn "萌宠跳跳
 - Khi một cột có **từ N ô cùng loại liền nhau ở trên cùng** (N đặt theo từng màn, 4 đến 10), cả nhóm nổ và cộng điểm. Nổ xong làm lộ ô úp, nếu ô vừa lật tạo thêm nhóm đủ N thì nổ tiếp (combo).
 - **Thắng:** dọn sạch bàn và khay. **Thua:** hết nước đi hợp lệ và không còn booster nào cứu được.
 - Booster: **Undo** (3 lần/màn), **Shuffle** (1), **Extra Slot** mở ô khay thứ 4 (1). Hết lượt có thể mua bằng coin. Dùng tối đa 0 / 2 booster sẽ được 3 / 2 sao, nhiều hơn được 1 sao.
-- 30 màn chiến dịch, sau đó là chế độ **Endless** sinh màn theo seed. Mọi màn đều được chứng minh là giải được (xem `Solver`).
+- 30 màn chiến dịch, cùng chế độ **Endless** sinh màn theo seed. Endless **mở ngay từ đầu** (nút hồng "Endless" ở màn chọn level) và có tiến trình riêng, không ảnh hưởng chiến dịch. Mọi màn đều được chứng minh là giải được (xem `Solver`).
 
 Phân tích video và các điểm đã xác nhận / giả định: [`docs/GAMEPLAY_ANALYSIS.md`](docs/GAMEPLAY_ANALYSIS.md).
 
@@ -86,7 +86,7 @@ node tools/process-assets.mjs --manifest
 
 Đã chạy và đạt:
 
-- `npm install`, `npm run build` (không lỗi TypeScript), `npm test`: **56 test** đạt. Có test chứng minh cả 30 màn chiến dịch và vài màn Endless giải được, phát lại lời giải bằng đúng luật của game.
+- `npm install`, `npm run build` (không lỗi TypeScript), `npm test`: **59 test** đạt. Có test chứng minh cả 30 màn chiến dịch và vài màn Endless giải được, phát lại lời giải bằng đúng luật của game.
 - Trình duyệt (Browser pane, `npm run dev` và bản `build` qua `vite preview`), viewport 360×640, 390×844, 640×360 và desktop:
   - Boot → Loading (có tiến trình) → Menu → Play → màn chơi.
   - Tutorial ở level 1: chạm sai cột bị bỏ qua, hai nước đi đúng được thực hiện.

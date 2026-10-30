@@ -1,8 +1,11 @@
+import { CAMPAIGN_LENGTH } from '../config/levels';
 import { platform } from './PlatformService';
 
 export interface SaveData {
-  /** Highest level the player may start. */
+  /** Highest campaign level the player may start. */
   unlocked: number;
+  /** Next Endless level to play (1-based); Endless is open from the start. */
+  endless: number;
   stars: Record<number, number>;
   bestScore: Record<number, number>;
   coins: number;
@@ -13,6 +16,7 @@ export interface SaveData {
 
 const DEFAULTS: SaveData = {
   unlocked: 1,
+  endless: 1,
   stars: {},
   bestScore: {},
   coins: 100,
@@ -68,7 +72,12 @@ export class SaveSystem {
     const best = this.data.bestScore[level] ?? 0;
     this.data.stars[level] = Math.max(this.data.stars[level] ?? 0, stars);
     this.data.bestScore[level] = Math.max(best, score);
-    this.data.unlocked = Math.max(this.data.unlocked, level + 1);
+    if (level > CAMPAIGN_LENGTH) {
+      // Endless wins only advance the Endless counter, never the campaign.
+      this.data.endless = Math.max(this.data.endless, level - CAMPAIGN_LENGTH + 1);
+    } else {
+      this.data.unlocked = Math.max(this.data.unlocked, level + 1);
+    }
     this.data.coins += coins;
     this.scheduleFlush();
     return score > best;
