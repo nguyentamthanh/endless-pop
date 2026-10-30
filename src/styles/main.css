@@ -1,0 +1,76 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 30%, #bfe7ff 0%, #7cc8f5 55%, #4f9fe0 100%);
+  overscroll-behavior: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Portrait play area; on wide screens it becomes a centred phone-shaped column. */
+#game {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(100vw, 75vh);
+  width: min(100vw, 75dvh);
+  height: 100vh;
+  height: 100dvh;
+}
+
+#game canvas {
+  display: block;
+  touch-action: none;
+}
+
+/* Phones held sideways: the board is portrait, so nudge once (fades out on its own, never blocks play). */
+#rotate-hint {
+  display: none;
+  position: fixed;
+  top: max(8px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(36, 64, 107, 0.82);
+  color: #fff;
+  font: 600 13px/1.2 Fredoka, 'Trebuchet MS', sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 10;
+}
+
+@media (orientation: landscape) and (max-height: 520px) and (pointer: coarse) {
+  #rotate-hint {
+    display: block;
+    animation: rotate-hint-fade 6s ease-in forwards;
+  }
+}
+
+@keyframes rotate-hint-fade {
+  0%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+/* Read by ui/layout.ts to know the notch / home-indicator insets. */
+#safe-area-probe {
+  position: fixed;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
