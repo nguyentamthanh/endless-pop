@@ -1,11 +1,9 @@
 import Phaser from 'phaser';
-import { bodyStyle } from '../config/theme';
 import { describe } from '../core/Board';
 import { mulberry32 } from '../core/rng';
 import { allLocs, sameLoc } from '../core/Rules';
 import { solve } from '../core/Solver';
 import { ClearEvent, Loc } from '../core/types';
-import { Mascot } from '../entities/Mascot';
 import { FxSystem } from '../systems/FxSystem';
 import { BOOSTER_PRICE, BoosterKind, GameplaySystem } from '../systems/GameplaySystem';
 import { levelLabel, loadLevel } from '../systems/LevelSystem';
@@ -17,10 +15,8 @@ import { TutorialSystem } from '../systems/TutorialSystem';
 import { Backdrop } from '../ui/Backdrop';
 import { BoardView } from '../ui/BoardView';
 import { BoosterBar } from '../ui/BoosterBar';
-import { Button } from '../ui/Button';
 import { HUD, HUD_HEIGHT } from '../ui/HUD';
 import { onLayout, safeInsets } from '../ui/layout';
-import { Panel } from '../ui/Panel';
 
 export interface ResultData {
   win: boolean;
@@ -273,7 +269,7 @@ export class GameScene extends Phaser.Scene {
   private checkEnd(): void {
     if (this.ended) return;
     if (this.play.won) void this.win();
-    else if (this.play.stuck) this.showNoMoves();
+    else if (this.play.stuck) void this.lose();
   }
 
   private async win(): Promise<void> {
@@ -292,10 +288,12 @@ export class GameScene extends Phaser.Scene {
 
   private async lose(): Promise<void> {
     this.ended = true;
+    this.deselect();
     services.audio.play('lose');
     platform.message('level_failed', this.levelId);
     this.hud.mascot.setMood('sad', 0);
-    await wait(this, 700);
+    this.fx.floatText(this.boardCenter.x, this.boardCenter.y, 'Out of moves!', 64, '#ff9fd0');
+    await wait(this, 1300);
     const s = this.play.score;
     this.openResult({ win: false, level: this.levelId, score: s.score, stars: 0, coins: 0, newBest: false, bestCombo: s.bestCombo });
   }
@@ -303,90 +301,6 @@ export class GameScene extends Phaser.Scene {
   private openResult(data: ResultData): void {
     this.scene.launch('Result', data);
     this.scene.pause();
-  }
-
-  private showNoMoves(): void {
-    const coins = services.save.get().coins;
-    this.hud.mascot.setMood('shocked', 0);
-    if (!this.play.canRescue(coins)) {
-      this.fx.floatText(this.boardCenter.x, this.boardCenter.y, 'Out of moves!', 64, '#ff9fd0');
-      void this.lose();
-      return;
-    }
-    this.busy = true;
-    services.audio.play('invalid');
-    const panel = new Panel(this, { width: 600, height: 820, title: 'No moves!' }).open();
-    const moo = new Mascot(this, 0, -235, 180);
-    moo.setMood('shocked', 0);
-    const msg = this.add.text(0, -105, "You can't clear the board.\nUse a booster to keep going?", bodyStyle(30)).setOrigin(0.5);
-    panel.content.add([moo, msg]);
-    const options: Array<[BoosterKind, string, string, boolean]> = [
-      ['undo', 'Undo', 'ic_undo', this.play.canUndo()],
-      ['shuffle', 'Shuffle', 'ic_shuffle', true],
-      ['slot', 'Extra slot', 'ic_add_slot', this.play.canUnlockSlot()],
-    ];
-    let y = -10;
-    for (const [kind, label, icon, possible] of options) {
-      if (!possible) continue;
-      const free = this.play.charges[kind] > 0;
-      const affordable = free || coins >= BOOSTER_PRICE[kind];
-      const btn = new Button(this, {
-        x: 0,
-        y,
-        texture: 'btn_blue',
-        width: 420,
-        height: 84,
-        label: free ? `${label} (${this.play.charges[kind]})` : `${label}  ${BOOSTER_PRICE[kind]}`,
-        icon,
-        fontSize: 32,
-        onClick: () =>
-          panel.close(() => {
-            this.busy = false;
-            this.hud.mascot.setMood('idle');
-            void this.useBooster(kind);
-          }),
-      }).setEnabled(affordable);
-      panel.content.add(btn);
-      y += 88;
-    }
-    // Opt-in rewarded ad: the free Shuffle is granted only once the platform confirms the ad was completed.
-    if (platform.rewardedSupported && this.play.charges.shuffle === 0) {
-      const ad = new Button(this, {
-        x: 0,
-        y,
-        texture: 'btn_green',
-        width: 420,
-        height: 84,
-        label: 'Watch ad: free Shuffle',
-        icon: 'ic_shuffle',
-        fontSize: 28,
-        onClick: () =>
-          panel.close(async () => {
-            const rewarded = await platform.showRewarded('free_shuffle');
-            this.busy = false;
-            if (rewarded) {
-              this.play.charges.shuffle++;
-              services.audio.play('coin');
-              void this.useBooster('shuffle');
-            } else {
-              this.showNoMoves();
-            }
-          }),
-      });
-      panel.content.add(ad);
-      y += 88;
-    }
-    const giveUp = new Button(this, {
-      x: 0,
-      y: y + 10,
-      texture: 'btn_pink',
-      width: 300,
-      height: 76,
-      label: 'Give up',
-      fontSize: 30,
-      onClick: () => panel.close(() => void this.lose()),
-    });
-    panel.content.add(giveUp);
   }
 
   // ---------------------------------------------------------------- pause / visibility
@@ -414,7 +328,7 @@ export class GameScene extends Phaser.Scene {
     (window as unknown as Record<string, unknown>).__ep = {
       state: () => describe(this.play.state),
       level: () => this.levelId,
-      noMoves: () => this.showNoMoves(),
+      noMoves: () => void this.lose(),
       /** Plays the solver's moves through the real input path until the level ends. */
       autoplay: async (maxMoves = 500) => {
         this.tutorial = undefined;

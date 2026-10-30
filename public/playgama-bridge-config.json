@@ -4,11 +4,11 @@
     "initialInterstitialDelay": 30,
     "interstitial": {
       "placementFallback": "level_end",
-      "placements": [{ "id": "level_end" }]
-    },
-    "rewarded": {
-      "placementFallback": "free_shuffle",
-      "placements": [{ "id": "free_shuffle" }]
+      "placements": [
+        {
+          "id": "level_end"
+        }
+      ]
     }
   }
 }

@@ -101,16 +101,6 @@ export class GameplaySystem {
     return result.solution === null && !result.exhausted;
   }
 
-  /** Whether any booster could still change a stuck position. */
-  canRescue(coins: number): boolean {
-    const affordable = (k: BoosterKind) => this.charges[k] > 0 || coins >= BOOSTER_PRICE[k];
-    return (
-      (this.canUndo() && affordable('undo')) ||
-      affordable('shuffle') ||
-      (this.canUnlockSlot() && affordable('slot'))
-    );
-  }
-
   private use(kind: BoosterKind): void {
     this.charges[kind] = Math.max(0, this.charges[kind] - 1);
     this.score.boostersUsed++;

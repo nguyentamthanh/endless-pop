@@ -9,7 +9,7 @@ Cơ chế chơi được xây dựng theo video tham chiếu (màn "萌宠跳跳
 - **Chạm một cột (hoặc ô khay)** để nhấc cả nhóm ô cùng loại đang nằm trên cùng, rồi **chạm cột đích** để thả.
   Đích hợp lệ: cột có ô trên cùng cùng loại, cột trống, ô khay trống hoặc ô khay đang giữ cùng loại.
 - Khi một cột có **từ N ô cùng loại liền nhau ở trên cùng** (N đặt theo từng màn, 4 đến 10), cả nhóm nổ và cộng điểm. Nổ xong làm lộ ô úp, nếu ô vừa lật tạo thêm nhóm đủ N thì nổ tiếp (combo).
-- **Thắng:** dọn sạch bàn và khay. **Thua:** hết nước đi hợp lệ và không còn booster nào cứu được.
+- **Thắng:** dọn sạch bàn và khay. **Thua:** hết nước đi hợp lệ, hoặc bàn đã bí (không thể thắng nữa) thì game báo "Out of moves!" và ra thẳng màn thua với nút Retry. Booster chỉ dùng được khi còn nước đi, để tránh rơi vào thế bí.
 - Booster: **Undo** (3 lần/màn), **Shuffle** (1), **Extra Slot** mở ô khay thứ 4 (1). Hết lượt có thể mua bằng coin. Dùng tối đa 0 / 2 booster sẽ được 3 / 2 sao, nhiều hơn được 1 sao.
 - 30 màn chiến dịch, cùng chế độ **Endless** sinh màn theo seed. Endless **mở ngay từ đầu** (nút hồng "Endless" ở màn chọn level) và có tiến trình riêng, không ảnh hưởng chiến dịch. Mọi màn đều được chứng minh là giải được (xem `Solver`).
 
@@ -80,18 +80,18 @@ node tools/process-assets.mjs --manifest
 - `TileSprite` và floating text được tái sử dụng (pool); particle emitter tạo một lần rồi `explode()`.
 - Tab ẩn: game tự Pause, tạm dừng AudioContext. Listener được gỡ khi scene shutdown.
 - Lưu tiến trình qua Playgama Bridge Storage (xem mục Xuất bản), ghi gộp theo lô nhỏ, không dùng `localStorage`.
-- Thua khi hết nước đi hợp lệ, hoặc khi bàn chật (không còn cột trống, tối đa 1 ô khay trống) mà solver chứng minh không thể thắng nữa (`GameplaySystem.isDeadEnd`). Khi đó game báo "No moves!" và cho dùng booster hoặc bỏ cuộc.
+- Thua khi hết nước đi hợp lệ, hoặc khi bàn chật (không còn cột trống, tối đa 1 ô khay trống) mà solver chứng minh không thể thắng nữa (`GameplaySystem.isDeadEnd`). Khi đó game báo "Out of moves!" rồi hiện màn thua (Retry / Home).
 
 ## Báo cáo kiểm thử
 
 Đã chạy và đạt:
 
-- `npm install`, `npm run build` (không lỗi TypeScript), `npm test`: **59 test** đạt. Có test chứng minh cả 30 màn chiến dịch và vài màn Endless giải được, phát lại lời giải bằng đúng luật của game.
+- `npm install`, `npm run build` (không lỗi TypeScript), `npm test`: **58 test** đạt. Có test chứng minh cả 30 màn chiến dịch và vài màn Endless giải được, phát lại lời giải bằng đúng luật của game.
 - Trình duyệt (Browser pane, `npm run dev` và bản `build` qua `vite preview`), viewport 360×640, 390×844, 640×360 và desktop:
   - Boot → Loading (có tiến trình) → Menu → Play → màn chơi.
   - Tutorial ở level 1: chạm sai cột bị bỏ qua, hai nước đi đúng được thực hiện.
   - Chạm chọn cột nguồn rồi cột đích bằng chuột; nhóm ô nhảy, nổ, tính điểm và combo.
-  - Thắng (3 sao, coin, lưu tiến trình, mở màn kế, nút Next/Replay/Home) và thua (panel "No moves!", Give up, nút Retry).
+  - Thắng (3 sao, coin, lưu tiến trình, mở màn kế, nút Next/Replay/Home) và thua (chữ "Out of moves!" rồi màn thua với nút Retry / Home).
   - Undo, Shuffle, Extra Slot (kể cả mua bằng coin), Pause / Resume / Restart / Home, tự Pause khi sự kiện tab ẩn.
   - Settings (Sound, Music, Replay tutorial, Reset progress), Level Select.
   - Bản build: 57 ảnh tải đủ, 0 lỗi 404, 0 lỗi console.
@@ -127,5 +127,5 @@ Lệnh này build rồi tạo `build/endless-pop-<version>.zip`. Mỗi bản ph�
 - Lưu tiến trình bằng `bridge.storage` (một lệnh đọc và một lệnh ghi cho mọi khoá).
 - `game_ready` gửi khi Menu hiện; `level_started / completed / failed / paused / resumed` gửi theo luồng chơi.
 - Sự kiện pause và audio của nền tảng được xử lý một chỗ (`main.ts`): tắt âm và tạm dừng màn chơi.
-- Quảng cáo: interstitial khi chuyển màn (nút Next, Retry); rewarded tự nguyện ("Watch ad: free Shuffle") chỉ cộng thưởng khi nền tảng báo `rewarded`.
+- Quảng cáo: interstitial khi chuyển màn (nút Next, Retry). `PlatformService.showRewarded` đã sẵn (chỉ trả về true khi nền tảng báo `rewarded`) nhưng chưa có nút nào dùng.
 - Telemetry: `performance_sample` mỗi 30 giây chơi, `booster_used`, `tutorial_completed`.

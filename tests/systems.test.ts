@@ -4,7 +4,7 @@ import { cloneState, tileCount } from '../src/game/core/Board';
 import { generateLevel } from '../src/game/core/LevelGenerator';
 import { mulberry32 } from '../src/game/core/rng';
 import { MoveResult, makeTile } from '../src/game/core/types';
-import { BOOSTER_PRICE, GameplaySystem } from '../src/game/systems/GameplaySystem';
+import { GameplaySystem } from '../src/game/systems/GameplaySystem';
 let nextTileId = 5000;
 import { ScoreSystem } from '../src/game/systems/ScoreSystem';
 
@@ -147,13 +147,5 @@ describe('GameplaySystem', () => {
     expect(g.charges.shuffle).toBe(0);
     g.undo();
     expect(g.state.cols).toEqual(before.cols);
-  });
-
-  it('canRescue depends on charges and coins', () => {
-    const g = new GameplaySystem(level);
-    expect(g.canRescue(0)).toBe(true); // free shuffle
-    g.charges = { undo: 0, shuffle: 0, slot: 0 };
-    expect(g.canRescue(0)).toBe(false);
-    expect(g.canRescue(BOOSTER_PRICE.shuffle)).toBe(true);
   });
 });
