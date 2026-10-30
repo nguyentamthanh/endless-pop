@@ -116,18 +116,31 @@ export class GameScene extends Phaser.Scene {
   private layout(w: number, h: number): void {
     const ins = safeInsets(this);
     const top = ins.top + 6;
-    this.hud.layout(w, top);
-    const slot = Math.min(108, (w - 32 - 2 * 104 - 50) / 4);
+    const left = ins.left;
+    const right = ins.right;
+    // Wide screens (desktop, tablets and phones held sideways) move the HUD into a side column so the
+    // board can use the full height; tall screens keep the HUD as a band on top.
+    const landscape = w > h * 1.05;
+    const sideW = landscape ? Math.min(440, Math.max(300, w * 0.22)) : 0;
+    if (landscape) this.hud.layoutSide(sideW, top, h, left);
+    else this.hud.layout(w, top, left);
+
+    const usableW = w - left - right;
+    const cx = left + usableW / 2;
+    const slot = Math.min(108, (usableW - 32 - 2 * 104 - 50) / 4);
     const gap = 10;
     const barY = h - ins.bottom - Math.max(70, slot / 2 + 24);
     const trayHalf = 2 * slot + 1.5 * gap;
     const btn = Math.min(100, slot * 1.02);
-    this.boosters.layout(w / 2 - trayHalf - 14 - btn / 2, w / 2 + trayHalf + 14 + btn / 2, barY, btn);
-    const boardTop = top + HUD_HEIGHT;
+    this.boosters.layout(cx - trayHalf - 14 - btn / 2, cx + trayHalf + 14 + btn / 2, barY, btn);
+    const boardTop = landscape ? top + 24 : top + HUD_HEIGHT;
     const boardBottom = barY - slot / 2 - 28;
-    this.view.layout({ x: 12, y: boardTop, w: w - 24, h: boardBottom - boardTop }, { cx: w / 2, cy: barY, slot, gap });
-    this.boardCenter = { x: w / 2, y: (boardTop + boardBottom) / 2 };
-    this.tutorial?.layout(w / 2, boardTop + 50);
+    // Symmetric side margins keep the board centred on screen in landscape.
+    const boardX = left + 12 + sideW;
+    const boardW = usableW - 24 - 2 * sideW;
+    this.view.layout({ x: boardX, y: boardTop, w: boardW, h: boardBottom - boardTop }, { cx, cy: barY, slot, gap }, landscape ? 124 : 96);
+    this.boardCenter = { x: cx, y: (boardTop + boardBottom) / 2 };
+    this.tutorial?.layout(cx, boardTop + 50);
   }
 
   // ---------------------------------------------------------------- input

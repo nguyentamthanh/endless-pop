@@ -81,9 +81,10 @@ export class BoardView {
 
   // ---------------------------------------------------------------- layout
 
-  layout(board: BoardRect, tray: TrayGeom): void {
+  /** `maxPitch` caps the tile spacing so short boards don't blow tiles up past their art resolution. */
+  layout(board: BoardRect, tray: TrayGeom, maxPitch = 96): void {
     const { cols, cfg } = this.state;
-    this.pitch = Math.min(board.w / cols.length, board.h / cfg.maxHeight, 96);
+    this.pitch = Math.min(board.w / cols.length, board.h / cfg.maxHeight, maxPitch);
     this.tile = Math.round(this.pitch * 0.94);
     const cx = board.x + board.w / 2;
     this.colX = cols.map((_, i) => cx + (i - (cols.length - 1) / 2) * this.pitch);

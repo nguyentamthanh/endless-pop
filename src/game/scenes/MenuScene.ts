@@ -53,26 +53,43 @@ export class MenuScene extends Phaser.Scene {
     const best = this.add.text(0, 0, `Best score: ${save.bestOverall()}`, textStyle(28)).setOrigin(0.5);
 
     onLayout(this, (w, h) => {
-      const top = safeInsets(this).top;
-      const bottom = safeInsets(this).bottom;
+      const ins = safeInsets(this);
+      const top = ins.top;
+      const bottom = ins.bottom;
       backdrop.layout(w, h);
-      settings.setPosition(62, top + 62);
-      sound.setPosition(w - 62, top + 62);
+      settings.setPosition(62 + ins.left, top + 62);
+      sound.setPosition(w - 62 - ins.right, top + 62);
       statsBg.clear().fillStyle(COLORS.shadow, 0.3).fillRoundedRect(w / 2 - 170, top + 36, 340, 54, 27);
       coinIcon.setPosition(w / 2 - 135, top + 63).setScale(44 / coinIcon.width);
       coinText.setPosition(w / 2 - 105, top + 63);
       starIcon.setPosition(w / 2 + 35, top + 63).setScale(44 / starIcon.width);
       starText.setPosition(w / 2 + 65, top + 63);
-      const titleY = top + Math.max(170, h * 0.15);
-      titleTop.setPosition(w / 2, titleY);
-      titleBottom.setPosition(w / 2, titleY + 120);
-      const playY = h - bottom - Math.max(250, h * 0.2);
-      moo.setPosition(w / 2, Math.min(playY - 280, titleY + 420));
-      mooHit.setPosition(moo.x, moo.y);
-      play.setPosition(w / 2, playY);
-      levelInfo.setPosition(w / 2, playY + 86);
-      levels.setPosition(w / 2, playY + 168);
       best.setPosition(w / 2, h - bottom - 34);
+
+      if (w > h * 1.05) {
+        // Wide screens: Moo on the left half, title and buttons on the right half.
+        const colX = w * 0.64;
+        moo.setSize2(Math.min(560, h * 0.5));
+        moo.setPosition(w * 0.32, h * 0.52);
+        const titleY = top + h * 0.2;
+        titleTop.setPosition(colX, titleY);
+        titleBottom.setPosition(colX, titleY + 120);
+        const playY = titleY + 360;
+        play.setPosition(colX, playY);
+        levelInfo.setPosition(colX, playY + 86);
+        levels.setPosition(colX, playY + 168);
+      } else {
+        moo.setSize2(430);
+        const titleY = top + Math.max(170, h * 0.15);
+        titleTop.setPosition(w / 2, titleY);
+        titleBottom.setPosition(w / 2, titleY + 120);
+        const playY = h - bottom - Math.max(250, h * 0.2);
+        moo.setPosition(w / 2, Math.min(playY - 280, titleY + 420));
+        play.setPosition(w / 2, playY);
+        levelInfo.setPosition(w / 2, playY + 86);
+        levels.setPosition(w / 2, playY + 168);
+      }
+      mooHit.setPosition(moo.x, moo.y);
     });
     this.cameras.main.fadeIn(250, 143, 211, 255);
     // First playable frame: loading is over and the player can tap Play.

@@ -33,10 +33,13 @@ export class HUD {
     this.mascot = new Mascot(scene, 0, 0, 120).setDepth(500);
   }
 
-  layout(w: number, top: number): void {
+  /** Portrait: one band across the top of the screen. */
+  layout(w: number, top: number, left = 0): void {
     const y1 = top + 52;
     const y2 = top + 140;
-    this.pauseBtn.setPosition(58, y1);
+    this.mascot.setSize2(120);
+    [this.levelText, this.scoreText, this.goalText, this.coinText].forEach((t) => t.setScale(1));
+    this.pauseBtn.setPosition(58 + left, y1);
     this.levelText.setPosition(w / 2, y1 - 6);
     this.scoreText.setPosition(w / 2, y1 + 36);
     this.coinIcon.setPosition(w - 150, y1).setScale(46 / this.coinIcon.width);
@@ -47,6 +50,27 @@ export class HUD {
     this.bar.setPosition(w / 2 + 45, y2 + 18).resize(barW);
     this.barText.setPosition(w / 2 + 45, y2 + 16);
     this.goalText.setPosition(w / 2 + 45, y2 - 22);
+  }
+
+  /** Landscape: a column on the left of the board, with a bigger Moo at the bottom. */
+  layoutSide(panelW: number, top: number, h: number, left = 0): void {
+    const cx = left + panelW / 2;
+    // The side column has room to spare, so its text is set larger than in the portrait band.
+    [this.levelText, this.scoreText, this.goalText, this.coinText].forEach((t) => t.setScale(1.3));
+    this.pauseBtn.setPosition(left + 58, top + 52);
+    this.levelText.setPosition(cx, top + 150);
+    this.scoreText.setPosition(cx, top + 210);
+    this.goalText.setPosition(cx, top + 265);
+    const barW = Math.min(panelW - 60, 360);
+    this.bar.setPosition(cx, top + 318).resize(barW);
+    this.barText.setPosition(cx, top + 316);
+    const coinY = top + 395;
+    this.coinIcon.setPosition(cx - 58, coinY).setScale(56 / this.coinIcon.width);
+    this.coinText.setPosition(cx - 24, coinY);
+    this.coinPill.clear().fillStyle(COLORS.shadow, 0.35).fillRoundedRect(cx - 92, coinY - 32, 184, 64, 32);
+    const mooSize = Math.max(140, Math.min(panelW * 0.75, h - top - 520, 300));
+    this.mascot.setSize2(mooSize);
+    this.mascot.setPosition(cx, Math.min(h - mooSize * 0.6, top + 440 + mooSize / 2));
   }
 
   setGoal(clearCount: number): void {

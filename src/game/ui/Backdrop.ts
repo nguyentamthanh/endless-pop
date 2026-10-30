@@ -33,8 +33,10 @@ export class Backdrop {
   layout(w: number, h: number): void {
     this.w = w;
     cover(this.sky, w, h);
+    // Cloud size follows a portrait-sized reference so wide screens don't get giant clouds.
+    const ref = Math.min(w, h * 0.7);
     this.clouds.forEach((c, i) => {
-      c.setScale(((0.32 + i * 0.1) * w) / c.width);
+      c.setScale(((0.32 + i * 0.1) * ref) / c.width);
       c.setY(h * (0.08 + i * 0.11));
       if (!c.getData('placed')) {
         c.setX(w * (0.2 + i * 0.33));

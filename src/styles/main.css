@@ -13,15 +13,15 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Portrait play area; on wide screens it becomes a centred phone-shaped column. */
+/* The game fills the viewport; on ultra-wide or very short windows it stops at 2:1 and leaves side margins. */
 #game {
   position: fixed;
   top: 0;
   bottom: 0;
   left: 50%;
   transform: translateX(-50%);
-  width: min(100vw, 75vh);
-  width: min(100vw, 75dvh);
+  width: min(100vw, 200vh);
+  width: min(100vw, 200dvh);
   height: 100vh;
   height: 100dvh;
 }

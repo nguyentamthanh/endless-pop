@@ -54,19 +54,22 @@ export class LevelSelectScene extends Phaser.Scene {
     }).setAlpha(endlessOpen ? 1 : 0.6);
 
     onLayout(this, (w, h) => {
-      const top = safeInsets(this).top;
+      const ins = safeInsets(this);
+      const top = ins.top;
       backdrop.layout(w, h);
-      back.setPosition(62, top + 62);
+      back.setPosition(62 + ins.left, top + 62);
       title.setPosition(w / 2, top + 62);
-      const cell = Math.min(132, (w - 40) / PER_ROW);
-      const rows = Math.ceil(CAMPAIGN_LENGTH / PER_ROW);
+      // Wide screens get a 10-wide grid (3 rows) instead of 5-wide (6 rows).
+      const perRow = w > h * 1.05 ? PER_ROW * 2 : PER_ROW;
+      const cell = Math.min(150, (w - ins.left - ins.right - 60) / perRow);
+      const rows = Math.ceil(CAMPAIGN_LENGTH / perRow);
       const avail = h - top - 340;
-      const pitchY = Math.min(cell + 34, avail / rows);
-      const startY = top + 170;
-      const scale = Math.min(1, (pitchY - 30) / 112, cell / 120);
+      const pitchY = Math.min(cell + 40, avail / rows);
+      const startY = top + 170 + (perRow > PER_ROW ? 60 : 0);
+      const scale = Math.min(1.2, (pitchY - 30) / 112, cell / 120);
       cells.forEach(({ btn, stars }, i) => {
-        const x = w / 2 + ((i % PER_ROW) - (PER_ROW - 1) / 2) * cell;
-        const y = startY + Math.floor(i / PER_ROW) * pitchY;
+        const x = w / 2 + ((i % perRow) - (perRow - 1) / 2) * cell;
+        const y = startY + Math.floor(i / perRow) * pitchY;
         btn.setPosition(x, y).setBaseScale(scale);
         stars.forEach((s, k) => s.setPosition(x + (k - 1) * 30 * scale, y + 62 * scale).setScale((30 * scale) / s.width));
       });
