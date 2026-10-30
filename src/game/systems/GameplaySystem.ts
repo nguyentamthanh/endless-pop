@@ -2,8 +2,12 @@ import { cloneState, isWin, restoreState, tileCount } from '../core/Board';
 import { GeneratedLevel } from '../core/LevelGenerator';
 import { Rng } from '../core/rng';
 import { applyMove, hasLegalMove, liftCount, moveCount, shuffleFaceUp } from '../core/Rules';
+import { solve } from '../core/Solver';
 import { GameState, Loc, MoveResult } from '../core/types';
 import { ScoreGain, ScoreSystem } from './ScoreSystem';
+
+/** Search budget (visited positions) for proving a position lost. */
+const DEAD_END_BUDGET = 20000;
 
 export type BoosterKind = 'undo' | 'shuffle' | 'slot';
 
@@ -77,8 +81,24 @@ export class GameplaySystem {
     return isWin(this.state);
   }
 
+  /** Lost: no legal move at all, or moves exist but none of them can ever lead to a win. */
   get stuck(): boolean {
-    return !this.won && !hasLegalMove(this.state);
+    return !this.won && (!hasLegalMove(this.state) || this.isDeadEnd());
+  }
+
+  /**
+   * True when an exhaustive search proves the board can no longer be cleared.
+   * The search only runs on cramped boards (no empty column, at most one free tray slot): with room to
+   * spare the position is virtually never lost and the search would be wasted work on phones.
+   */
+  isDeadEnd(): boolean {
+    const s = this.state;
+    if (s.cols.some((c) => c.length === 0)) return false;
+    const freeSlots = s.tray.slice(0, s.trayOpen).filter((t) => t.length === 0).length;
+    if (freeSlots > 1) return false;
+    const result = solve(s, DEAD_END_BUDGET);
+    // An exhausted budget means "unknown": keep playing rather than declare a loss that isn't proven.
+    return result.solution === null && !result.exhausted;
   }
 
   /** Whether any booster could still change a stuck position. */

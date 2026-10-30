@@ -5,7 +5,7 @@ Cơ chế chơi được xây dựng theo video tham chiếu (màn "萌宠跳跳
 
 ## Cách chơi
 
-- Bàn chơi gồm các cột ô xếp chồng. Phần dưới mỗi cột là các ô úp (hình chân mèo); ô úp tự lật khi trở thành ô trên cùng.
+- Bàn chơi gồm các cột ô xếp chồng. Từ **level 4** trở đi, phần dưới mỗi cột là các ô úp dấu **"?"** (không biết hình gì phía sau); ô úp tự lật khi trở thành ô trên cùng. Level 1–3 chơi hoàn toàn ngửa.
 - **Chạm một cột (hoặc ô khay)** để nhấc cả nhóm ô cùng loại đang nằm trên cùng, rồi **chạm cột đích** để thả.
   Đích hợp lệ: cột có ô trên cùng cùng loại, cột trống, ô khay trống hoặc ô khay đang giữ cùng loại.
 - Khi một cột có **từ N ô cùng loại liền nhau ở trên cùng** (N đặt theo từng màn, 4 đến 10), cả nhóm nổ và cộng điểm. Nổ xong làm lộ ô úp, nếu ô vừa lật tạo thêm nhóm đủ N thì nổ tiếp (combo).
@@ -79,7 +79,8 @@ node tools/process-assets.mjs --manifest
 - Mọi animation dùng Phaser Tween (nhảy theo Bezier, squash-and-stretch, lật thẻ, pop). Chuyển động nền dùng delta time. Không dùng Arcade Physics vì không cần.
 - `TileSprite` và floating text được tái sử dụng (pool); particle emitter tạo một lần rồi `explode()`.
 - Tab ẩn: game tự Pause, tạm dừng AudioContext. Listener được gỡ khi scene shutdown.
-- Lưu tiến trình bằng `localStorage` (`endlesspop.v1`), mọi truy cập bọc `try/catch`.
+- Lưu tiến trình qua Playgama Bridge Storage (xem mục Xuất bản), ghi gộp theo lô nhỏ, không dùng `localStorage`.
+- Thua khi hết nước đi hợp lệ, hoặc khi bàn chật (không còn cột trống, tối đa 1 ô khay trống) mà solver chứng minh không thể thắng nữa (`GameplaySystem.isDeadEnd`). Khi đó game báo "No moves!" và cho dùng booster hoặc bỏ cuộc.
 
 ## Báo cáo kiểm thử
 
@@ -103,3 +104,28 @@ Chưa kiểm thử / hạn chế còn lại:
 - Ba đám mây Gemini tạo ra gần giống nhau; icon "coin" trông giống quả địa cầu hơn là xu có đốm bò; icon mặt Moo đang mếu. Đều dùng được nhưng có thể tạo lại bằng cách sửa prompt trong `tools/asset-jobs.mjs`.
 - Chưa có quảng cáo / mua hàng thật: "video ad" trong game gốc được thay bằng booster mua bằng coin.
 - Bundle JS ≈ 1,26 MB (340 KB gzip) chủ yếu là Phaser. Có thể giảm thêm bằng custom build của Phaser nếu cần.
+
+## Xuất bản
+
+| Nơi | Địa chỉ | Ghi chú |
+|---|---|---|
+| Vercel (production) | https://endless-pop.vercel.app | `npx vercel deploy --prod --yes` (Vercel tự chạy `npm run build`) |
+| Playgama sandbox | https://playgama.ai/play/dl7kz2ghdsiwpv | Game id `cmvufjso70e5glq0h4gyusk7l`; build check PASSED, Bridge 2.3.1 |
+
+Đóng gói để tải lên Playgama (`index.html` ở gốc zip, tên file chỉ có ký tự Latin):
+
+```bash
+npm run pack
+```
+
+Lệnh này build rồi tạo `build/endless-pop-<version>.zip`. Mỗi bản phát hành mới cần tăng `version` trong `package.json` để tên archive khác nhau.
+
+### Tích hợp Playgama Bridge
+
+- `@playgama/bridge` nạp từ CDN của Playgama (có bản dự phòng cục bộ `playgama-bridge.js`); cấu hình ở `public/playgama-bridge-config.json`.
+- `src/game/systems/PlatformService.ts` bọc toàn bộ lời gọi SDK bằng `try/catch`, nên game vẫn chạy khi không có Bridge.
+- Lưu tiến trình bằng `bridge.storage` (một lệnh đọc và một lệnh ghi cho mọi khoá).
+- `game_ready` gửi khi Menu hiện; `level_started / completed / failed / paused / resumed` gửi theo luồng chơi.
+- Sự kiện pause và audio của nền tảng được xử lý một chỗ (`main.ts`): tắt âm và tạm dừng màn chơi.
+- Quảng cáo: interstitial khi chuyển màn (nút Next, Retry); rewarded tự nguyện ("Watch ad: free Shuffle") chỉ cộng thưởng khi nền tảng báo `rewarded`.
+- Telemetry: `performance_sample` mỗi 30 giây chơi, `booster_used`, `tutorial_completed`.

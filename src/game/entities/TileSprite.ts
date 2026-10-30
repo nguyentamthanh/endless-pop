@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { textStyle } from '../config/theme';
 
 /**
  * One board tile: card base + icon, or the face-down back.
@@ -12,6 +13,7 @@ export class TileSprite extends Phaser.GameObjects.Container {
   private base: Phaser.GameObjects.Image;
   private icon: Phaser.GameObjects.Image;
   private back: Phaser.GameObjects.Image;
+  private mark: Phaser.GameObjects.Text;
   private faceDown = false;
 
   constructor(scene: Phaser.Scene) {
@@ -20,7 +22,9 @@ export class TileSprite extends Phaser.GameObjects.Container {
     this.base = scene.add.image(0, 0, 'tile_base');
     this.icon = scene.add.image(0, 0, 'icon_0');
     this.back = scene.add.image(0, 0, 'tile_back').setVisible(false);
-    this.add([this.glow, this.base, this.icon, this.back]);
+    // Face-down tiles show a big "?": the player can't tell what is underneath until it is uncovered.
+    this.mark = scene.add.text(0, 0, '?', textStyle(64, '#ffffff', '#1f4a9e')).setOrigin(0.5).setVisible(false);
+    this.add([this.glow, this.base, this.icon, this.back, this.mark]);
     scene.add.existing(this);
   }
 
@@ -39,6 +43,7 @@ export class TileSprite extends Phaser.GameObjects.Container {
     // Cards are slightly taller than wide (3D lip); squash to a square cell so stacks tile exactly.
     this.base.setDisplaySize(size, size);
     this.back.setDisplaySize(size, size);
+    this.mark.setFontSize(Math.round(size * 0.7)).setStroke('#1f4a9e', Math.max(3, Math.round(size * 0.1))).setY(-size * 0.02);
     const iconSize = size * 0.74;
     this.icon.setScale(iconSize / Math.max(this.icon.width, this.icon.height)).setY(-size * 0.03);
     this.glow.setScale((size * 1.6) / this.glow.width);
@@ -49,6 +54,7 @@ export class TileSprite extends Phaser.GameObjects.Container {
     this.base.setVisible(!down);
     this.icon.setVisible(!down);
     this.back.setVisible(down);
+    this.mark.setVisible(down);
   }
 
   isFaceDown = () => this.faceDown;

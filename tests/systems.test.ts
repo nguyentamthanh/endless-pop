@@ -5,6 +5,7 @@ import { generateLevel } from '../src/game/core/LevelGenerator';
 import { mulberry32 } from '../src/game/core/rng';
 import { MoveResult, makeTile } from '../src/game/core/types';
 import { BOOSTER_PRICE, GameplaySystem } from '../src/game/systems/GameplaySystem';
+let nextTileId = 5000;
 import { ScoreSystem } from '../src/game/systems/ScoreSystem';
 
 const clearOf = (n: number, runs = 1): MoveResult => ({
@@ -56,6 +57,36 @@ describe('ScoreSystem', () => {
     expect(s.stars()).toBe(1);
     expect(s.coinsFor(3)).toBe(40);
     expect(s.coinsFor(1)).toBe(20);
+  });
+});
+
+describe('dead ends', () => {
+  const fake = (cols: number[][], tray: number[][]) => {
+    const state = {
+      cols: cols.map((c) => c.map((t) => makeTile(nextTileId++, t))),
+      hidden: cols.map(() => 0),
+      tray: [...tray.map((t) => t.map((x) => makeTile(nextTileId++, x))), []].slice(0, 4),
+      trayOpen: 3,
+      cfg: { maxHeight: 8, clearCount: 4, trayCapacity: 3, traySize: 4 },
+    };
+    while (state.tray.length < 4) state.tray.push([]);
+    return new GameplaySystem({ state, def: {}, iconMap: [], seedUsed: 0, solution: null } as never);
+  };
+
+  it('declares a loss when moves exist but the board can never be cleared', () => {
+    // Only three tiles of type 0 exist and four are needed to pop, so no sequence of moves can win.
+    const g = fake([[0, 0, 0]], [[1], [2]]);
+    expect(g.stuck).toBe(true);
+  });
+
+  it('does not call a winnable cramped board lost', () => {
+    const g = fake([[0, 0, 0, 0, 1], [1]], [[1], [1]]);
+    expect(g.stuck).toBe(false);
+  });
+
+  it('skips the search when there is room to move', () => {
+    const g = fake([[0, 0, 0], []], [[1]]);
+    expect(g.isDeadEnd()).toBe(false);
   });
 });
 

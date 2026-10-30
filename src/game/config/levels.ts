@@ -3,6 +3,7 @@ import { LevelDef } from '../core/types';
 
 /**
  * Hand-tuned campaign. Edit freely; `npm test` proves every level is solvable.
+ * Face-down "?" tiles (hiddenRows) start at level 4; levels 1-3 are fully face-up.
  * Columns: id, columns, types, clearCount (N), maxHeight, groupsPerType, hiddenRows,
  *          emptyColumns, traySlots, trayCapacity, maxChunk
  */
@@ -11,8 +12,8 @@ type Row = [number, number, number, number, number, number, number, number, numb
 // prettier-ignore
 const ROWS: Row[] = [
   [ 1, 4, 3,  4,  8, 1, 0, 1, 3, 3, 2],
-  [ 2, 5, 3,  4,  9, 2, 1, 1, 3, 3, 2],
-  [ 3, 5, 4,  4, 10, 2, 2, 1, 3, 3, 2],
+  [ 2, 5, 3,  4,  9, 2, 0, 1, 3, 3, 2],
+  [ 3, 5, 4,  4, 10, 2, 0, 1, 3, 3, 2],
   [ 4, 6, 4,  5, 10, 2, 2, 1, 3, 4, 3],
   [ 5, 6, 4,  5, 11, 2, 3, 0, 3, 4, 3],
   [ 6, 6, 5,  5, 11, 2, 3, 1, 3, 4, 3],

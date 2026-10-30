@@ -296,7 +296,7 @@ export class GameScene extends Phaser.Scene {
     const coins = services.save.get().coins;
     this.hud.mascot.setMood('shocked', 0);
     if (!this.play.canRescue(coins)) {
-      this.toast('No moves left!');
+      this.fx.floatText(this.boardCenter.x, this.boardCenter.y, 'Out of moves!', 64, '#ff9fd0');
       void this.lose();
       return;
     }
@@ -305,7 +305,7 @@ export class GameScene extends Phaser.Scene {
     const panel = new Panel(this, { width: 600, height: 820, title: 'No moves!' }).open();
     const moo = new Mascot(this, 0, -235, 180);
     moo.setMood('shocked', 0);
-    const msg = this.add.text(0, -100, 'Use a booster to keep going?', bodyStyle(32)).setOrigin(0.5);
+    const msg = this.add.text(0, -105, "You can't clear the board.\nUse a booster to keep going?", bodyStyle(30)).setOrigin(0.5);
     panel.content.add([moo, msg]);
     const options: Array<[BoosterKind, string, string, boolean]> = [
       ['undo', 'Undo', 'ic_undo', this.play.canUndo()],
