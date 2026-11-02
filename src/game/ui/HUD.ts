@@ -73,8 +73,8 @@ export class HUD {
     this.mascot.setPosition(cx, Math.min(h - mooSize * 0.6, top + 440 + mooSize / 2));
   }
 
-  setGoal(clearCount: number): void {
-    this.goalText.setText(`Stack ${clearCount} alike to pop`);
+  setGoal(text: string): void {
+    this.goalText.setText(text);
   }
 
   setCoins(n: number): void {

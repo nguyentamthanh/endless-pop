@@ -14,7 +14,10 @@ export class TileSprite extends Phaser.GameObjects.Container {
   private icon: Phaser.GameObjects.Image;
   private back: Phaser.GameObjects.Image;
   private mark: Phaser.GameObjects.Text;
+  private iceMark: Phaser.GameObjects.Text;
   private faceDown = false;
+  private iceLayers = 0;
+  private frostOnBack = false;
 
   constructor(scene: Phaser.Scene) {
     super(scene, 0, 0);
@@ -24,13 +27,16 @@ export class TileSprite extends Phaser.GameObjects.Container {
     this.back = scene.add.image(0, 0, 'tile_back').setVisible(false);
     // Face-down tiles show a big "?": the player can't tell what is underneath until it is uncovered.
     this.mark = scene.add.text(0, 0, '?', textStyle(64, '#ffffff', '#1f4a9e')).setOrigin(0.5).setVisible(false);
-    this.add([this.glow, this.base, this.icon, this.back, this.mark]);
+    this.iceMark = scene.add.text(0, 0, '', textStyle(28, '#e8f7ff', '#1a4d86')).setOrigin(0.5).setVisible(false);
+    this.add([this.glow, this.base, this.icon, this.back, this.mark, this.iceMark]);
     scene.add.existing(this);
   }
 
   setup(tileId: number, iconKey: string, size: number, faceDown: boolean): this {
     this.tileId = tileId;
     this.icon.setTexture(iconKey);
+    this.iceLayers = 0;
+    this.frostOnBack = false;
     this.setTileSize(size);
     this.setFaceDown(faceDown);
     this.setGlow(false);
@@ -44,6 +50,7 @@ export class TileSprite extends Phaser.GameObjects.Container {
     this.base.setDisplaySize(size, size);
     this.back.setDisplaySize(size, size);
     this.mark.setFontSize(Math.round(size * 0.7)).setStroke('#1f4a9e', Math.max(3, Math.round(size * 0.1))).setY(-size * 0.02);
+    this.iceMark.setFontSize(Math.round(size * 0.34)).setStroke('#1a4d86', Math.max(2, Math.round(size * 0.06))).setY(size * 0.28);
     const iconSize = size * 0.74;
     this.icon.setScale(iconSize / Math.max(this.icon.width, this.icon.height)).setY(-size * 0.03);
     this.glow.setScale((size * 1.6) / this.glow.width);
@@ -55,6 +62,23 @@ export class TileSprite extends Phaser.GameObjects.Container {
     this.icon.setVisible(!down);
     this.back.setVisible(down);
     this.mark.setVisible(down);
+    this.applyIce();
+  }
+
+  /** Ice layers. `frostOnBack` draws a flake on a still-closed box (hidden from level 71). */
+  setIce(layers: number, frostOnBack: boolean): void {
+    this.iceLayers = layers;
+    this.frostOnBack = frostOnBack;
+    this.applyIce();
+  }
+
+  private applyIce(): void {
+    const frozen = this.iceLayers > 0 && !this.faceDown;
+    this.iceMark.setVisible(frozen || (this.faceDown && this.frostOnBack && this.iceLayers > 0));
+    this.iceMark.setText(this.iceLayers > 1 ? `❄${this.iceLayers}` : '❄');
+    this.base.setTint(frozen ? 0xb9e7ff : 0xffffff);
+    if (this.faceDown) this.iceMark.setY(-this.size * 0.22);
+    else this.iceMark.setY(this.size * 0.28);
   }
 
   isFaceDown = () => this.faceDown;

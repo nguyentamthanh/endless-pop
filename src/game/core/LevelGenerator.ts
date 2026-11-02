@@ -1,10 +1,10 @@
-import { topRunLength } from './Board';
+import { COLUMN_CAP, COLUMN_COUNT, GameState, LevelDef, makeTile, Tile, TRAY_SLOTS, withIce } from './types';
+import { moveCount } from './Rules';
 import { mulberry32, randInt, Rng, shuffleInPlace } from './rng';
-import { Move, solve } from './Solver';
-import { GameState, LevelDef, makeTile, tileType } from './types';
+import { Move, searchWin } from './Solver';
 
 export const ICON_COUNT = 8;
-export const TRAY_SIZE = 4;
+export const TRAY_SIZE = TRAY_SLOTS;
 
 export interface GeneratedLevel {
   def: LevelDef;
@@ -12,132 +12,175 @@ export interface GeneratedLevel {
   /** Maps board type index → icon index (0..ICON_COUNT-1). */
   iconMap: number[];
   seedUsed: number;
-  /** A known solution from the starting state (null only if validation failed). */
+  /** A known solution from the starting state (null if the time budget ran out). */
   solution: Move[] | null;
+  verified: boolean;
 }
 
-function columnHeights(def: LevelDef, total: number, rng: Rng): number[] {
-  const filled = def.columns - def.emptyColumns;
-  const cap = def.maxHeight - 1;
-  const base = Math.floor(total / filled);
-  if (base > cap || (base === cap && total % filled > 0)) {
-    throw new Error(`Level ${def.id}: ${total} tiles do not fit in ${filled} columns of ${def.maxHeight}`);
-  }
-  const h = new Array<number>(filled).fill(base);
-  for (let i = 0; i < total % filled; i++) h[i]++;
-  // Uneven skyline like the reference: shift tiles between random columns.
-  for (let i = 0; i < filled * 2; i++) {
-    const a = randInt(rng, 0, filled - 1);
-    const b = randInt(rng, 0, filled - 1);
-    if (a !== b && h[a] > 3 && h[b] < cap) {
-      h[a]--;
-      h[b]++;
-    }
-  }
-  return h;
+interface IceSpec {
+  count: number;
+  layers: [number, number];
 }
 
-/** Sequence of tile types laid in short chunks so the board starts mixed but readable. */
-function typeSequence(def: LevelDef, rng: Rng): number[] {
-  const remaining = new Array<number>(def.types).fill(def.groupsPerType * def.clearCount);
-  const seq: number[] = [];
-  let prev = -1;
-  for (;;) {
-    const choices = remaining.map((n, t) => (n > 0 && t !== prev ? t : -1)).filter((t) => t >= 0);
-    const pool = choices.length ? choices : remaining.map((n, t) => (n > 0 ? t : -1)).filter((t) => t >= 0);
-    if (!pool.length) return seq;
-    // Weighted by remaining count keeps the distribution even through the sequence.
-    let roll = rng() * pool.reduce((s, t) => s + remaining[t], 0);
-    let type = pool[0];
-    for (const t of pool) {
-      roll -= remaining[t];
-      if (roll <= 0) {
-        type = t;
-        break;
-      }
-    }
-    const chunk = Math.min(remaining[type], randInt(rng, 1, def.maxChunk));
-    for (let i = 0; i < chunk; i++) seq.push(type);
-    remaining[type] -= chunk;
-    prev = type;
-  }
+interface Params {
+  K: number;
+  blind: number;
+  opened: number[];
+  ice: IceSpec | null;
+  frost: number;
 }
 
-/** Builds the starting board for one seed (no solvability check). */
-export function buildState(def: LevelDef, seed: number): GameState {
-  const rng = mulberry32(seed);
-  const total = def.types * def.groupsPerType * def.clearCount;
-  for (let attempt = 0; attempt < 50; attempt++) {
-    const heights = columnHeights(def, total, rng);
-    const seq = typeSequence(def, rng);
-    const filled: number[][] = [];
-    let p = 0;
-    for (const h of heights) {
-      filled.push(seq.slice(p, p + h));
-      p += h;
+const GROUPS: Array<{ max: number; K: [number, number] }> = [
+  { max: 10, K: [3, 3] },
+  { max: 20, K: [4, 4] },
+  { max: 30, K: [5, 5] },
+  { max: 40, K: [6, 6] },
+  { max: 9999, K: [7, 7] },
+];
+
+/** Intro levels teach one new rule with 5 treats. */
+const INTRO: Record<number, string> = { 41: 'fewer', 51: 'ice', 61: 'frostbox', 71: 'hiddenfrost' };
+
+const groupOf = (n: number) => GROUPS.find((g) => n <= g.max) ?? GROUPS[GROUPS.length - 1];
+
+function params(n: number, r: Rng): Params {
+  const g = groupOf(n);
+  const p: Params = {
+    K: INTRO[n] ? 5 : randInt(r, g.K[0], g.K[1]),
+    blind: 8,
+    opened: [3, 3, 3, 3, 2, 2, 2, 2],
+    ice: null,
+    frost: 0,
+  };
+  if (n >= 41) {
+    p.blind = 9;
+    p.opened = [2, 2, 2, 2, 1, 1, 1, 1];
+  }
+  if (n >= 51) {
+    const hard = n % 5 === 0;
+    const rest = n % 5 === 1 && n !== 51;
+    if (n === 51) p.ice = { count: 2, layers: [1, 1] };
+    else if (hard) p.ice = { count: 3, layers: [1, 2] };
+    else if (!rest && r() < 0.5) p.ice = { count: randInt(r, 2, 3), layers: [1, 1] };
+  }
+  if (n >= 61) {
+    const hard = n % 5 === 0;
+    const rest = n % 5 === 1 && !INTRO[n];
+    p.frost = INTRO[n] ? 3 : hard ? randInt(r, 3, 4) : rest ? 0 : randInt(r, 2, 3);
+    if (n === 61 || n === 71) p.ice = null;
+    else if (hard) p.ice = null;
+  }
+  if (n >= 100) {
+    p.ice = { count: randInt(r, 2, 3), layers: [1, 2] };
+    p.frost = randInt(r, 3, 4);
+  }
+  return p;
+}
+
+function candidate(r: Rng, P: Params, n: number, uid: { v: number }): GameState {
+  const opened = shuffleInPlace(P.opened.slice(), r);
+  const sizes = opened.map((o) => P.blind + o);
+  const total = sizes.reduce((a, b) => a + b, 0);
+  const full = total / COLUMN_CAP;
+  const share = new Array<number>(P.K).fill(1);
+  for (let x = P.K; x < full; x++) share[Math.floor(r() * P.K)]++;
+  const counts = share.map((v) => v * COLUMN_CAP);
+  const tiles: number[] = [];
+  counts.forEach((nn, k) => {
+    for (let x = 0; x < nn; x++) tiles.push(k);
+  });
+  shuffleInPlace(tiles, r);
+  const cols: Tile[][] = [];
+  const hidden: number[] = [];
+  let p = 0;
+  for (let i = 0; i < COLUMN_COUNT; i++) {
+    const slice = tiles.slice(p, p + sizes[i]);
+    p += sizes[i];
+    cols.push(slice.map((k) => makeTile(++uid.v, k)));
+    hidden.push(P.blind);
+  }
+  if (P.ice) {
+    const spots = shuffleInPlace(
+      cols.map((_, i) => i).filter((i) => cols[i].length - hidden[i] >= 2),
+      r,
+    ).slice(0, P.ice.count);
+    for (const i of spots) {
+      const openCount = cols[i].length - hidden[i];
+      const pick = hidden[i] + Math.floor(r() * (openCount - 1));
+      cols[i][pick] = withIce(cols[i][pick], randInt(r, P.ice.layers[0], P.ice.layers[1]));
     }
-    // No run on the board may be close to popping at the start.
-    const tooLong = filled.some((c) => {
-      let run = 1;
-      for (let i = 1; i < c.length; i++) {
-        run = c[i] === c[i - 1] ? run + 1 : 1;
-        if (run >= def.clearCount - 1) return true;
-      }
-      return false;
+  }
+  if (P.frost) {
+    const boxes: Array<[number, number]> = [];
+    cols.forEach((c, ci) => {
+      for (let x = 1; x < hidden[ci] && x < c.length; x++) boxes.push([ci, x]);
     });
-    if (tooLong) continue;
-
-    const order = shuffleInPlace(
-      Array.from({ length: def.columns }, (_, i) => i),
-      rng,
-    );
-    const cols: number[][] = Array.from({ length: def.columns }, () => []);
-    let id = 1;
-    filled.forEach((types, i) => {
-      cols[order[i]] = types.map((t) => makeTile(id++, t));
-    });
-    const state: GameState = {
-      cols,
-      hidden: cols.map((c) => Math.min(def.hiddenRows, Math.max(0, c.length - 1))),
-      tray: Array.from({ length: TRAY_SIZE }, () => []),
-      trayOpen: def.traySlots,
-      cfg: {
-        maxHeight: def.maxHeight,
-        clearCount: def.clearCount,
-        trayCapacity: def.trayCapacity,
-        traySize: TRAY_SIZE,
-      },
-    };
-    if (state.cols.some((_, i) => topRunLength(state, i) >= def.clearCount)) continue;
-    return state;
+    shuffleInPlace(boxes, r);
+    for (const [ci, x] of boxes.slice(0, P.frost)) cols[ci][x] = withIce(cols[ci][x], 1);
   }
-  throw new Error(`Level ${def.id}: could not lay out tiles`);
+  return {
+    cols,
+    hidden,
+    tray: [[], [], [], []],
+    trayOpen: 2,
+    moves: 0,
+    counts,
+    level: n,
+    cfg: { maxHeight: COLUMN_CAP, traySize: TRAY_SLOTS },
+  };
 }
 
-export function iconMapFor(def: LevelDef): number[] {
-  const rng = mulberry32(def.seed ^ 0x5eed);
-  const icons = shuffleInPlace(
-    Array.from({ length: ICON_COUNT }, (_, i) => i),
-    rng,
-  );
-  return icons.slice(0, def.types);
+function hasShelfMove(s: GameState): boolean {
+  for (let i = 0; i < s.cols.length; i++) {
+    for (let j = 0; j < s.cols.length; j++) {
+      if (s.cols[j].length > 0 && moveCount(s, { kind: 'col', index: i }, { kind: 'col', index: j }) > 0) return true;
+    }
+  }
+  return false;
 }
+
+const cache = new Map<number, GeneratedLevel>();
 
 /**
- * Builds a level and proves it can be cleared, retrying with derived seeds.
- * Deterministic: the same def always yields the same board.
+ * Seeded board for level N. Same recipe as the Sweet Hop Sort reference:
+ * 8 columns, 12-high, 7 full sets plus one empty column, blind boxes on the bottom.
  */
-export function generateLevel(def: LevelDef, budget = 5000, attempts = 40): GeneratedLevel {
-  let last: GeneratedLevel | null = null;
-  for (let a = 0; a < attempts; a++) {
-    const seedUsed = (def.seed + a * 7919) >>> 0;
-    const state = buildState(def, seedUsed);
-    const { solution } = solve(state, budget);
-    last = { def, state, iconMap: iconMapFor(def), seedUsed, solution };
-    if (solution) return last;
+export function generateLevel(def: LevelDef): GeneratedLevel {
+  const n = def.id;
+  const hit = cache.get(n);
+  if (hit) return hit;
+  const r = mulberry32(n * 7919 + 13);
+  const P = params(n, r);
+  const uid = { v: n * 1000 };
+  const playouts = n > 60 ? 40 : n > 30 ? 28 : 16;
+  let fallback: GameState | null = null;
+  let solution: Move[] | null = null;
+  let state: GameState | null = null;
+  const t0 = performance.now();
+  for (let a = 0; a < 150 && !solution && performance.now() - t0 < 1500; a++) {
+    const s = candidate(r, P, n, uid);
+    if (!hasShelfMove(s)) continue;
+    fallback ??= s;
+    const win = searchWin(s, r, playouts);
+    if (win) {
+      state = s;
+      solution = win;
+    }
   }
-  return last!;
+  state ??= fallback ?? candidate(r, P, n, uid);
+  const out: GeneratedLevel = {
+    def,
+    state,
+    iconMap: Array.from({ length: ICON_COUNT }, (_, i) => i),
+    seedUsed: n * 7919 + 13,
+    solution,
+    verified: solution !== null,
+  };
+  cache.set(n, out);
+  return out;
 }
 
-export const typesOnBoard = (s: GameState): number[] =>
-  [...new Set(s.cols.flat().concat(s.tray.flat()).map(tileType))].sort();
+/** Test hook: drop the memo so a fresh seed walk can be observed. */
+export function clearLevelCache(): void {
+  cache.clear();
+}

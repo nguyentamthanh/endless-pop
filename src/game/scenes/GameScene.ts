@@ -1,9 +1,8 @@
 import Phaser from 'phaser';
 import { describe } from '../core/Board';
-import { mulberry32 } from '../core/rng';
 import { allLocs, sameLoc } from '../core/Rules';
 import { solve } from '../core/Solver';
-import { ClearEvent, Loc } from '../core/types';
+import { Loc } from '../core/types';
 import { FxSystem } from '../systems/FxSystem';
 import { BOOSTER_PRICE, BoosterKind, GameplaySystem } from '../systems/GameplaySystem';
 import { levelLabel, loadLevel } from '../systems/LevelSystem';
@@ -30,6 +29,13 @@ export interface ResultData {
 
 const wait = (scene: Phaser.Scene, ms: number) => new Promise<void>((r) => scene.time.delayedCall(ms, r));
 
+const MECHANIC_TIP: Record<number, string> = {
+  41: 'Blind boxes — opening one cracks nearby ice',
+  51: 'Frozen treats. The hammer breaks the top ice',
+  61: 'Frosted boxes stay icy after they flip',
+  71: 'Some ? boxes hide frost underneath',
+};
+
 export class GameScene extends Phaser.Scene {
   private levelId = 1;
   private play!: GameplaySystem;
@@ -41,9 +47,9 @@ export class GameScene extends Phaser.Scene {
   private selected: Loc | null = null;
   private busy = false;
   private ended = false;
-  private popCombo = 0;
+  private hammerArmed = false;
+  private stuckWarned = false;
   private boardCenter = { x: 360, y: 640 };
-  private rng = mulberry32(Date.now() >>> 0);
   private sampler = new PerformanceSampler();
 
   constructor() {
@@ -55,6 +61,8 @@ export class GameScene extends Phaser.Scene {
     this.selected = null;
     this.busy = true;
     this.ended = false;
+    this.hammerArmed = false;
+    this.stuckWarned = false;
     this.tutorial = undefined;
   }
 
@@ -63,14 +71,22 @@ export class GameScene extends Phaser.Scene {
     this.play = new GameplaySystem(level);
     const backdrop = new Backdrop(this, 'bg_game', false);
     this.fx = new FxSystem(this);
-    this.view = new BoardView(this, this.play.state, level.iconMap, (loc) => this.onTap(loc));
+    this.view = new BoardView(
+      this,
+      this.play.state,
+      level.iconMap,
+      (loc) => this.onTap(loc),
+      (loc) => this.onDragStart(loc),
+      (from, to) => this.onDrop(from, to),
+    );
     this.hud = new HUD(this, levelLabel(this.levelId), () => this.pause());
-    this.hud.setGoal(level.def.clearCount);
+    this.hud.setGoal('Fill each column with 12 alike');
     this.boosters = new BoosterBar(this, (k) => void this.useBooster(k));
+    this.boosters.setHammerVisible(this.play.hammerUnlocked);
 
     const save = services.save.get();
     if (this.levelId === 1 && !save.tutorialDone && level.solution) {
-      this.tutorial = new TutorialSystem(this, this.view, level.solution, level.def.clearCount);
+      this.tutorial = new TutorialSystem(this, this.view, level.solution);
     }
 
     onLayout(this, (w, h) => {
@@ -78,10 +94,6 @@ export class GameScene extends Phaser.Scene {
       this.layout(w, h);
     });
 
-    this.events.on('tile-pop', (x: number, y: number) => {
-      this.fx.pop(x, y);
-      services.audio.play('pop', this.popCombo);
-    });
     this.game.events.on(Phaser.Core.Events.HIDDEN, this.onHidden, this);
     this.game.events.on(PLATFORM_PAUSE_EVENT, this.onHidden, this);
     this.events.on(Phaser.Scenes.Events.PAUSE, this.sampler.reset, this.sampler);
@@ -91,17 +103,20 @@ export class GameScene extends Phaser.Scene {
       this.game.events.off(PLATFORM_PAUSE_EVENT, this.onHidden, this);
       this.events.off(Phaser.Scenes.Events.PAUSE, this.sampler.reset, this.sampler);
       this.events.off(Phaser.Scenes.Events.RESUME, this.sampler.reset, this.sampler);
-      this.events.off('tile-pop');
       this.view.destroy();
       if (this.debugEnabled()) delete (window as unknown as Record<string, unknown>).__ep;
     });
 
     this.refreshUI();
-    this.hud.setProgress(0, this.play.totalTiles, false);
+    this.hud.setProgress(0, this.play.goal, false);
     this.cameras.main.fadeIn(220, 143, 211, 255);
     services.audio.play('whoosh');
     platform.message('level_started', this.levelId);
-    this.time.delayedCall(this.view.introDrop(), () => (this.busy = false));
+    const tip = MECHANIC_TIP[this.levelId];
+    this.time.delayedCall(this.view.introDrop(), () => {
+      this.busy = false;
+      if (tip) this.toast(tip);
+    });
     if (this.debugEnabled()) this.installDebug();
   }
 
@@ -143,6 +158,11 @@ export class GameScene extends Phaser.Scene {
 
   private onTap(loc: Loc): void {
     if (this.busy || this.ended) return;
+    if (this.hammerArmed) {
+      if (loc.kind === 'col') void this.swingHammer(loc.index);
+      else this.toast('Tap a frozen column');
+      return;
+    }
     if (this.tutorial && !this.tutorial.allow(loc)) return;
     if (loc.kind === 'tray' && loc.index >= this.play.state.trayOpen) {
       void this.useBooster('slot');
@@ -169,6 +189,42 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private onDragStart(loc: Loc): boolean {
+    if (this.busy || this.ended || this.hammerArmed) return false;
+    if (this.tutorial && !this.tutorial.allow(loc)) return false;
+    if (loc.kind === 'tray' && loc.index >= this.play.state.trayOpen) return false;
+    if (this.play.lift(loc) <= 0) return false;
+    this.select(loc);
+    return true;
+  }
+
+  private onDrop(from: Loc, to: Loc): void {
+    if (this.busy || this.ended) {
+      this.deselect();
+      return;
+    }
+    if (sameLoc(from, to)) {
+      this.deselect();
+      return;
+    }
+    if (this.tutorial && !this.tutorial.allow(to)) {
+      this.deselect();
+      return;
+    }
+    if (to.kind === 'tray' && to.index >= this.play.state.trayOpen) {
+      this.deselect();
+      void this.useBooster('slot');
+      return;
+    }
+    if (this.play.count(from, to) > 0) {
+      void this.performMove(from, to);
+      return;
+    }
+    services.audio.play('invalid');
+    this.hud.mascot.setMood('shocked', 700);
+    this.deselect();
+  }
+
   private select(loc: Loc): void {
     this.selected = loc;
     this.view.lift(loc, this.play.lift(loc));
@@ -178,29 +234,32 @@ export class GameScene extends Phaser.Scene {
   }
 
   private deselect(): void {
+    const had = this.selected;
     this.selected = null;
     this.view.drop();
+    if (had) this.tutorial?.onCancelled();
   }
 
   private async performMove(from: Loc, to: Loc): Promise<void> {
     this.busy = true;
     this.selected = null;
     const { result, gain } = this.play.move(from, to);
-    this.popCombo = gain.combo;
-    await this.view.animateMove(result, (ev, center) => this.onClear(ev, center, gain));
+    await this.view.animateMove(result, (col, center) => {
+      if (col === result.completed[0]) this.onSorted(center, gain);
+    });
     this.hud.setScore(this.play.score.score);
-    this.hud.setProgress(this.play.score.cleared, this.play.totalTiles);
+    this.hud.setProgress(this.play.completed, this.play.goal);
     this.refreshUI();
     this.tutorial?.onMoved();
     this.busy = false;
     this.checkEnd();
   }
 
-  private onClear(ev: ClearEvent, c: { x: number; y: number }, gain: ScoreGain): void {
-    const pts = Math.round(ev.tiles.length * 10 * gain.multiplier);
-    this.fx.starBurst(c.x, c.y, 8 + gain.combo * 2);
-    this.fx.floatText(c.x, c.y - 20, `+${pts}`, 44, '#fff27a');
+  private onSorted(c: { x: number; y: number }, gain: ScoreGain): void {
+    this.fx.starBurst(c.x, c.y, 10 + gain.combo * 2);
+    this.fx.floatText(c.x, c.y - 20, `+${gain.points}`, 44, '#fff27a');
     this.hud.mascot.setMood('happy');
+    services.audio.play('pop', gain.combo);
     if (gain.combo >= 2) {
       this.fx.floatText(this.boardCenter.x, this.boardCenter.y - 80, `Combo x${gain.combo}!`, 64, '#ff9fd0');
       services.audio.play('combo', gain.combo);
@@ -212,8 +271,15 @@ export class GameScene extends Phaser.Scene {
 
   private async useBooster(kind: BoosterKind): Promise<void> {
     if (this.busy || this.ended || this.tutorial?.active) return;
+    if (kind === 'hammer' && !this.play.hammerUnlocked) return;
+    if (kind === 'hammer' && this.hammerArmed) {
+      this.hammerArmed = false;
+      this.refreshUI();
+      return;
+    }
     if (kind === 'undo' && !this.play.canUndo()) return this.toast('Nothing to undo');
     if (kind === 'slot' && !this.play.canUnlockSlot()) return;
+    if (kind === 'hammer' && !this.play.hasIce() && !this.hammerArmed) return this.toast('No ice to break');
     if (this.play.charges[kind] === 0) {
       if (!services.save.spendCoins(BOOSTER_PRICE[kind])) {
         services.audio.play('invalid');
@@ -224,22 +290,20 @@ export class GameScene extends Phaser.Scene {
       this.hud.bumpCoins();
     }
     this.deselect();
+    if (kind === 'hammer') {
+      this.hammerArmed = true;
+      this.refreshUI();
+      this.toast('Tap a frozen column');
+      return;
+    }
     this.busy = true;
     platform.track('booster_used', { kind });
     if (kind === 'undo') {
       this.play.undo();
       this.view.syncAll(260);
       this.hud.setScore(this.play.score.score);
-      this.hud.setProgress(this.play.score.cleared, this.play.totalTiles);
+      this.hud.setProgress(this.play.completed, this.play.goal);
       await wait(this, 300);
-    } else if (kind === 'shuffle') {
-      if (!this.play.shuffle(this.rng)) {
-        this.busy = false;
-        return this.toast('Nothing to shuffle');
-      }
-      this.cameras.main.shake(160, 0.003);
-      this.view.syncAll(450);
-      await wait(this, 480);
     } else {
       this.play.unlockSlot();
       this.view.refreshTray();
@@ -253,9 +317,28 @@ export class GameScene extends Phaser.Scene {
     this.checkEnd();
   }
 
+  private async swingHammer(col: number): Promise<void> {
+    if (!this.play.hammer(col)) {
+      this.toast('No ice in that column');
+      return;
+    }
+    this.hammerArmed = false;
+    this.busy = true;
+    platform.track('booster_used', { kind: 'hammer' });
+    this.cameras.main.shake(120, 0.004);
+    this.view.syncAll(220);
+    const p = this.view.stackTopPos({ kind: 'col', index: col });
+    this.fx.starBurst(p.x, p.y, 10);
+    services.audio.play('booster');
+    await wait(this, 240);
+    this.refreshUI();
+    this.busy = false;
+    this.checkEnd();
+  }
+
   private refreshUI(): void {
     const c = this.play.charges;
-    this.boosters.refresh(c, this.play.canUndo());
+    this.boosters.refresh(c, this.play.canUndo(), this.hammerArmed);
     this.view.refreshTray(c.slot > 0 ? `+${c.slot}` : `${BOOSTER_PRICE.slot}`);
     this.hud.setCoins(services.save.get().coins);
   }
@@ -269,7 +352,14 @@ export class GameScene extends Phaser.Scene {
   private checkEnd(): void {
     if (this.ended) return;
     if (this.play.won) void this.win();
-    else if (this.play.stuck) void this.lose();
+    else if (this.play.stuck) {
+      if (this.play.canRecover(services.save.get().coins)) {
+        if (!this.stuckWarned) {
+          this.stuckWarned = true;
+          this.toast('Out of space — use a booster');
+        }
+      } else void this.lose();
+    } else this.stuckWarned = false;
   }
 
   private async win(): Promise<void> {
@@ -292,7 +382,7 @@ export class GameScene extends Phaser.Scene {
     services.audio.play('lose');
     platform.message('level_failed', this.levelId);
     this.hud.mascot.setMood('sad', 0);
-    this.fx.floatText(this.boardCenter.x, this.boardCenter.y, 'Out of moves!', 64, '#ff9fd0');
+    this.fx.floatText(this.boardCenter.x, this.boardCenter.y, 'Out of space!', 64, '#ff9fd0');
     await wait(this, 1300);
     const s = this.play.score;
     this.openResult({ win: false, level: this.levelId, score: s.score, stars: 0, coins: 0, newBest: false, bestCombo: s.bestCombo });

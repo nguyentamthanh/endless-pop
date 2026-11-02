@@ -1,151 +1,131 @@
 import { describe, expect, it } from 'vitest';
-import { CAMPAIGN } from '../src/game/config/levels';
-import { cloneState, tileCount } from '../src/game/core/Board';
-import { generateLevel } from '../src/game/core/LevelGenerator';
-import { mulberry32 } from '../src/game/core/rng';
-import { MoveResult, makeTile } from '../src/game/core/types';
+import { cloneState } from '../src/game/core/Board';
+import { GeneratedLevel } from '../src/game/core/LevelGenerator';
+import { GameState, Loc, MoveResult, makeTile, tileIce, tileType, withIce } from '../src/game/core/types';
 import { GameplaySystem } from '../src/game/systems/GameplaySystem';
-let nextTileId = 5000;
 import { ScoreSystem } from '../src/game/systems/ScoreSystem';
 
-const clearOf = (n: number, runs = 1): MoveResult => ({
-  from: { kind: 'col', index: 0 },
-  to: { kind: 'col', index: 1 },
+let nextId = 1;
+const C = (index: number): Loc => ({ kind: 'col', index });
+
+function board(cols: number[][], extra: Partial<GameState> = {}): GameState {
+  return {
+    cols: cols.map((c) => c.map((t) => makeTile(nextId++, t))),
+    hidden: cols.map(() => 0),
+    tray: [[], [], [], []],
+    trayOpen: 2,
+    moves: 0,
+    counts: [],
+    level: extra.level ?? 1,
+    cfg: { maxHeight: 12, traySize: 4 },
+    ...extra,
+  };
+}
+
+function play(state: GameState, id = state.level): GameplaySystem {
+  const level: GeneratedLevel = {
+    def: { id, seed: 1 },
+    state,
+    iconMap: [],
+    seedUsed: 1,
+    solution: null,
+    verified: false,
+  };
+  return new GameplaySystem(level);
+}
+
+const sorted = (n = 1): MoveResult => ({
+  from: C(0),
+  to: C(1),
   moved: [],
   revealed: [],
-  clears: Array.from({ length: runs }, () => ({ col: 1, tiles: Array.from({ length: n }, (_, i) => makeTile(i + 1, 0)) })),
+  completed: Array.from({ length: n }, (_, i) => i),
 });
 
 describe('ScoreSystem', () => {
-  it('scores 10 per tile with no combo on a first clear', () => {
+  it('scores 120 for the first completed column', () => {
     const s = new ScoreSystem();
-    const gain = s.onMove(clearOf(4));
-    expect(gain).toEqual({ points: 40, combo: 1, multiplier: 1 });
-    expect(s.score).toBe(40);
-    expect(s.cleared).toBe(4);
+    expect(s.onMove(sorted())).toEqual({ points: 120, combo: 1, multiplier: 1 });
+    expect(s.cleared).toBe(1);
   });
 
-  it('chains combos across consecutive clearing moves and applies 0.5 steps', () => {
+  it('chains combos across consecutive sorts', () => {
     const s = new ScoreSystem();
-    s.onMove(clearOf(4));
-    const second = s.onMove(clearOf(4));
+    s.onMove(sorted());
+    const second = s.onMove(sorted());
     expect(second.combo).toBe(2);
     expect(second.multiplier).toBe(1.5);
-    expect(second.points).toBe(60);
+    expect(second.points).toBe(180);
   });
 
-  it('counts every run popped by one move (cascade) as a combo step', () => {
+  it('counts every column completed by one move', () => {
     const s = new ScoreSystem();
-    const gain = s.onMove(clearOf(4, 2));
+    const gain = s.onMove(sorted(2));
     expect(gain.combo).toBe(2);
-    expect(gain.points).toBe(Math.round(8 * 10 * 1.5));
+    expect(gain.points).toBe(360);
   });
 
   it('drops the combo after more than two quiet moves', () => {
     const s = new ScoreSystem();
-    s.onMove(clearOf(4));
-    for (let i = 0; i < 3; i++) s.onMove(clearOf(0, 0));
-    expect(s.onMove(clearOf(4)).combo).toBe(1);
+    s.onMove(sorted());
+    for (let i = 0; i < 3; i++) s.onMove(sorted(0));
+    expect(s.onMove(sorted()).combo).toBe(1);
   });
 
-  it('awards stars by booster usage and coins by stars', () => {
+  it('awards stars by booster usage', () => {
     const s = new ScoreSystem();
     expect(s.stars()).toBe(3);
     s.boostersUsed = 2;
     expect(s.stars()).toBe(2);
     s.boostersUsed = 3;
     expect(s.stars()).toBe(1);
-    expect(s.coinsFor(3)).toBe(40);
-    expect(s.coinsFor(1)).toBe(20);
-  });
-});
-
-describe('dead ends', () => {
-  const fake = (cols: number[][], tray: number[][]) => {
-    const state = {
-      cols: cols.map((c) => c.map((t) => makeTile(nextTileId++, t))),
-      hidden: cols.map(() => 0),
-      tray: [...tray.map((t) => t.map((x) => makeTile(nextTileId++, x))), []].slice(0, 4),
-      trayOpen: 3,
-      cfg: { maxHeight: 8, clearCount: 4, trayCapacity: 3, traySize: 4 },
-    };
-    while (state.tray.length < 4) state.tray.push([]);
-    return new GameplaySystem({ state, def: {}, iconMap: [], seedUsed: 0, solution: null } as never);
-  };
-
-  it('declares a loss when moves exist but the board can never be cleared', () => {
-    // Only three tiles of type 0 exist and four are needed to pop, so no sequence of moves can win.
-    const g = fake([[0, 0, 0]], [[1], [2]]);
-    expect(g.stuck).toBe(true);
-  });
-
-  it('does not call a winnable cramped board lost', () => {
-    const g = fake([[0, 0, 0, 0, 1], [1]], [[1], [1]]);
-    expect(g.stuck).toBe(false);
-  });
-
-  it('skips the search when there is room to move', () => {
-    const g = fake([[0, 0, 0], []], [[1]]);
-    expect(g.isDeadEnd()).toBe(false);
   });
 });
 
 describe('GameplaySystem', () => {
-  const level = generateLevel(CAMPAIGN[0]);
-
-  it('plays the stored solution to a win with full stars', () => {
-    const g = new GameplaySystem(level);
-    for (const [from, to] of level.solution!) g.move(from, to);
-    expect(g.won).toBe(true);
-    expect(g.score.cleared).toBe(g.totalTiles);
-    expect(g.score.stars()).toBe(3);
-  });
-
-  it('undo restores board, score and costs a charge', () => {
-    const g = new GameplaySystem(level);
+  it('undo restores the board, keeps a newly opened tray slot, and costs a charge', () => {
+    const g = play(board([[2, 1, 1], []]));
     const before = cloneState(g.state);
-    const [from, to] = level.solution![0];
-    g.move(from, to);
-    expect(g.canUndo()).toBe(true);
+    g.move(C(0), C(1));
+    g.charges.slot = 2;
+    expect(g.unlockSlot()).toBe(true);
     expect(g.undo()).toBe(true);
-    expect(g.state.cols).toEqual(before.cols);
-    expect(g.score.score).toBe(0);
-    expect(g.charges.undo).toBe(2);
-    expect(g.score.boostersUsed).toBe(1);
-    expect(g.undo()).toBe(false);
-  });
-
-  it('undo rewinds the points of a clearing move', () => {
-    const g = new GameplaySystem(level);
-    for (const [from, to] of level.solution!) {
-      g.move(from, to);
-      if (g.score.score > 0) break;
-    }
-    expect(g.score.score).toBeGreaterThan(0);
-    const cleared = g.score.cleared;
-    g.undo();
-    expect(g.score.cleared).toBeLessThan(cleared);
-  });
-
-  it('unlocks the extra tray slot once and keeps tile count', () => {
-    const g = new GameplaySystem(level);
-    const n = tileCount(g.state);
+    expect(g.state.cols.map((c) => c.map(tileType))).toEqual(before.cols.map((c) => c.map(tileType)));
     expect(g.state.trayOpen).toBe(3);
+    expect(g.charges.undo).toBe(2);
     expect(g.unlockSlot()).toBe(true);
     expect(g.state.trayOpen).toBe(4);
     expect(g.canUnlockSlot()).toBe(false);
-    expect(g.unlockSlot()).toBe(false);
-    expect(tileCount(g.state)).toBe(n);
   });
 
-  it('shuffle keeps tile count, can be undone, and counts as a booster', () => {
-    const g = new GameplaySystem(generateLevel(CAMPAIGN[9]));
-    const n = tileCount(g.state);
-    const before = cloneState(g.state);
-    expect(g.shuffle(mulberry32(3))).toBe(true);
-    expect(tileCount(g.state)).toBe(n);
-    expect(g.charges.shuffle).toBe(0);
-    g.undo();
-    expect(g.state.cols).toEqual(before.cols);
+  it('breaks the highest iced tile with the hammer from level 51', () => {
+    const early = board([[1]]);
+    early.cols[0][0] = withIce(early.cols[0][0], 1);
+    expect(play(early, 1).hammer(0)).toBe(false);
+
+    const iced = board([[1, 2]], { level: 51 });
+    iced.cols[0][0] = withIce(iced.cols[0][0], 1);
+    iced.cols[0][1] = withIce(iced.cols[0][1], 2);
+    const g = play(iced, 51);
+    expect(g.hammerUnlocked).toBe(true);
+    expect(g.hammer(0)).toBe(true);
+    expect(tileIce(g.state.cols[0][1])).toBe(0);
+    expect(tileIce(g.state.cols[0][0])).toBe(1);
+    expect(g.charges.hammer).toBe(0);
+    expect(g.hammer(0)).toBe(false);
+  });
+
+  it('is stuck without a legal move, but can recover with a booster', () => {
+    const iced = board([[1]], { level: 51 });
+    iced.cols[0][0] = withIce(iced.cols[0][0], 1);
+    const g = play(iced, 51);
+    expect(g.stuck).toBe(true);
+    expect(g.won).toBe(false);
+    expect(g.canRecover(0)).toBe(true);
+    g.charges.hammer = 0;
+    g.charges.undo = 0;
+    g.charges.slot = 0;
+    expect(g.canRecover(0)).toBe(false);
+    expect(g.canRecover(80)).toBe(true);
   });
 });

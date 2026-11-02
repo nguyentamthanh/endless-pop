@@ -1,22 +1,29 @@
 /**
- * A tile is packed into one integer: `id << 4 | type`.
+ * A tile is packed into one integer: `id << 7 | ice << 4 | type`.
  * Packing keeps board snapshots (undo, solver search) cheap to copy.
+ * Ice layers live on the tile so a frosted blind box stays frozen after it flips.
  */
 export type Tile = number;
 
+export const COLUMN_CAP = 12;
+export const COLUMN_COUNT = 8;
+export const TRAY_SLOTS = 4;
+/** Frozen treats and the hammer arrive together. */
+export const HAMMER_FROM = 51;
+/** From this level, frosted blind boxes look like ordinary "?". */
+export const FROST_HIDDEN_FROM = 71;
+
 export const tileType = (t: Tile): number => t & 15;
-export const tileId = (t: Tile): number => t >> 4;
-export const makeTile = (id: number, type: number): Tile => (id << 4) | type;
+export const tileIce = (t: Tile): number => (t >> 4) & 7;
+export const tileId = (t: Tile): number => t >> 7;
+export const makeTile = (id: number, type: number, ice = 0): Tile => (id << 7) | ((ice & 7) << 4) | (type & 15);
+export const withIce = (t: Tile, ice: number): Tile => makeTile(tileId(t), tileType(t), ice);
 
 export type Loc = { kind: 'col'; index: number } | { kind: 'tray'; index: number };
 
 export interface RuleConfig {
-  /** Max tiles a column can hold. */
+  /** Max tiles a column can hold. A full column is exactly this many of one treat. */
   maxHeight: number;
-  /** Run length that pops. */
-  clearCount: number;
-  /** Max tiles one tray slot can hold. */
-  trayCapacity: number;
   /** Total tray slots including locked ones. */
   traySize: number;
 }
@@ -24,49 +31,33 @@ export interface RuleConfig {
 export interface GameState {
   /** Columns, index 0 = bottom. */
   cols: Tile[][];
-  /** Number of face-down tiles at the bottom of each column. */
+  /** Face-down tiles at the bottom of each column (a prefix). */
   hidden: number[];
-  /** Tray slots; each holds tiles of one type. */
+  /** Tray slots; each holds at most one tile. */
   tray: Tile[][];
   /** How many tray slots are unlocked. */
   trayOpen: number;
+  moves: number;
+  /** How many tiles of each type belong on the board. Multiples of COLUMN_CAP. */
+  counts: number[];
+  /** 1-based level number. Drives frost visibility, not the move rules. */
+  level: number;
   cfg: RuleConfig;
-}
-
-export interface ClearEvent {
-  col: number;
-  tiles: Tile[];
 }
 
 export interface MoveResult {
   from: Loc;
   to: Loc;
-  /** Tiles that moved, bottom-most first, as they sit in the destination. */
+  /** Tiles that moved, bottom-most first. */
   moved: Tile[];
-  /** Tiles that turned face-up (in any column) as a consequence of the move. */
+  /** The blind box that flipped, if the move uncovered one. */
   revealed: Tile[];
-  /** Runs that popped, in order. */
-  clears: ClearEvent[];
+  /** Columns that became a full set of one treat on this move. */
+  completed: number[];
 }
 
 export interface LevelDef {
   /** 1-based level number (endless levels continue the count). */
   id: number;
   seed: number;
-  columns: number;
-  /** Number of distinct tile types on the board. */
-  types: number;
-  clearCount: number;
-  maxHeight: number;
-  /** Groups of `clearCount` tiles per type. */
-  groupsPerType: number;
-  /** Face-down rows at the bottom of each column. */
-  hiddenRows: number;
-  /** Columns that start empty. */
-  emptyColumns: number;
-  /** Unlocked tray slots at start. */
-  traySlots: number;
-  trayCapacity: number;
-  /** Longest run of one type the generator may lay down. */
-  maxChunk: number;
 }

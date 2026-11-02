@@ -1,80 +1,75 @@
 import { cloneState, isWin, topRunLength } from './Board';
-import { applyMove, legalMoves } from './Rules';
-import { GameState, Loc, tileType } from './types';
+import { applyMove, legalMoves, moveCount } from './Rules';
+import { mulberry32, Rng } from './rng';
+import { GameState, Loc } from './types';
 
 export type Move = [Loc, Loc];
 
 export interface SolveResult {
   solution: Move[] | null;
   nodes: number;
-  /** True when the search gave up because it hit the node budget. */
+  /** True when the search gave up without a win. */
   exhausted: boolean;
 }
 
-/** Column order and tray order don't affect the rules, so sort them for the visited set. */
-function stateKey(s: GameState): string {
-  const cols = s.cols.map((c, i) => `${s.hidden[i]}:${c.map(tileType).join('')}`).sort();
-  const tray = s.tray.slice(0, s.trayOpen).map((t) => t.map(tileType).join('')).sort();
-  return `${cols.join('|')}#${tray.join('|')}`;
-}
-
-/** Moves that can never help: moving a whole fully-visible column into an empty one. */
-function isPointless(s: GameState, [from, to]: Move): boolean {
-  if (from.kind !== 'col' || to.kind !== 'col') return false;
-  const src = s.cols[from.index];
-  return s.cols[to.index].length === 0 && s.hidden[from.index] === 0 && topRunLength(s, from.index) === src.length;
-}
-
-function scoreChild(before: GameState, after: GameState, [from, to]: Move, cleared: number, revealed: number): number {
-  let score = cleared * 100 + revealed * 30;
-  if (to.kind === 'col') {
-    score += before.cols[to.index].length > 0 ? 20 + topRunLength(after, to.index) * 3 : 4;
-  } else {
-    score -= 25;
+function scoreMove(s: GameState, [from, to]: Move): number {
+  if (from.kind === 'tray') return s.cols[to.index].length ? 14 : 3;
+  const c = s.cols[from.index];
+  if (to.kind === 'tray') {
+    const below = c.length >= 2 ? c.length - 2 : -1;
+    return -6 + (below >= 0 && below < s.hidden[from.index] ? 3 : 0);
   }
-  if (from.kind === 'tray') score += 15;
-  return score;
+  const len = moveCount(s, from, to);
+  const below = c.length - len - 1;
+  const rev = below >= 0 && below < s.hidden[from.index] ? 5 : 0;
+  if (s.cols[to.index].length === 0) return 1 + rev;
+  return 6 + 2 * topRunLength(s, to.index) + rev;
 }
 
 /**
- * Depth-first search with a visited set and a node budget.
- * Used to guarantee that generated levels can be cleared, and by the debug autoplayer.
+ * Greedy random playouts with full knowledge, matching the reference solver.
+ * Uses the caller's RNG so level generation stays deterministic.
+ * Returns the moves of the first winning playout, or null.
  */
-export function solve(start: GameState, budget = 60000): SolveResult {
-  const visited = new Set<string>();
-  const path: Move[] = [];
-  let nodes = 0;
-  let exhausted = false;
-
-  const dfs = (s: GameState): boolean => {
-    if (isWin(s)) return true;
-    if (nodes >= budget) {
-      exhausted = true;
-      return false;
+export function searchWin(s0: GameState, r: Rng, playouts: number): Move[] | null {
+  for (let p = 0; p < playouts; p++) {
+    const s = cloneState(s0);
+    s.trayOpen = Math.min(s.trayOpen, 2);
+    const moves: Move[] = [];
+    let last: Move | null = null;
+    for (let step = 0; step < 450; step++) {
+      if (isWin(s)) return moves;
+      let ms = legalMoves(s);
+      if (last && last[0].kind === 'col' && last[1].kind === 'col') {
+        const back = last;
+        ms = ms.filter((m) => !(m[0].kind === 'col' && m[1].kind === 'col' && m[0].index === back[1].index && m[1].index === back[0].index));
+      }
+      if (!ms.length) break;
+      let m: Move;
+      if (r() < 0.72) {
+        let best = -1e9;
+        m = ms[0];
+        for (const x of ms) {
+          const sc = scoreMove(s, x) + r() * 2;
+          if (sc > best) {
+            best = sc;
+            m = x;
+          }
+        }
+      } else {
+        m = ms[Math.floor(r() * ms.length)];
+      }
+      applyMove(s, m[0], m[1]);
+      moves.push(m);
+      last = m;
     }
-    nodes++;
-    const key = stateKey(s);
-    if (visited.has(key)) return false;
-    visited.add(key);
+  }
+  return null;
+}
 
-    const children: Array<{ move: Move; next: GameState; score: number }> = [];
-    for (const move of legalMoves(s)) {
-      if (isPointless(s, move)) continue;
-      const next = cloneState(s);
-      const res = applyMove(next, move[0], move[1]);
-      const cleared = res.clears.reduce((n, c) => n + c.tiles.length, 0);
-      children.push({ move, next, score: scoreChild(s, next, move, cleared, res.revealed.length) });
-    }
-    children.sort((a, b) => b.score - a.score);
-    for (const child of children) {
-      path.push(child.move);
-      if (dfs(child.next)) return true;
-      path.pop();
-      if (exhausted) return false;
-    }
-    return false;
-  };
-
-  const ok = dfs(cloneState(start));
-  return { solution: ok ? path.slice() : null, nodes, exhausted };
+/** A few fresh playouts. Used by debug autoplay, not by level generation. */
+export function solve(s: GameState, playouts = 48): SolveResult {
+  const r = mulberry32((s.level * 997 + s.moves * 13 + 1) >>> 0);
+  const solution = searchWin(s, r, playouts);
+  return { solution, nodes: playouts, exhausted: solution === null };
 }

@@ -7,6 +7,7 @@ import { Button, iconButton } from '../ui/Button';
 import { onLayout, safeInsets } from '../ui/layout';
 
 const PER_ROW = 5;
+const PER_PAGE = 20;
 
 export class LevelSelectScene extends Phaser.Scene {
   constructor() {
@@ -18,6 +19,8 @@ export class LevelSelectScene extends Phaser.Scene {
     const backdrop = new Backdrop(this, 'bg_game', false, false);
     const title = this.add.text(0, 0, 'Levels', textStyle(64)).setOrigin(0.5);
     const back = iconButton(this, 0, 0, 88, 'ic_home', () => this.go('Menu'));
+    let page = 0;
+    const pages = Math.ceil(CAMPAIGN_LENGTH / PER_PAGE);
 
     const cells = Array.from({ length: CAMPAIGN_LENGTH }, (_, i) => {
       const level = i + 1;
@@ -42,6 +45,34 @@ export class LevelSelectScene extends Phaser.Scene {
     });
 
     // Endless is open from the start and keeps its own progress.
+    const prev = new Button(this, {
+      x: 0,
+      y: 0,
+      texture: 'btn_blue',
+      width: 140,
+      height: 80,
+      label: 'Prev',
+      fontSize: 32,
+      onClick: () => {
+        page = Math.max(0, page - 1);
+        place();
+      },
+    });
+    const next = new Button(this, {
+      x: 0,
+      y: 0,
+      texture: 'btn_blue',
+      width: 140,
+      height: 80,
+      label: 'Next',
+      fontSize: 32,
+      onClick: () => {
+        page = Math.min(pages - 1, page + 1);
+        place();
+      },
+    });
+    const pageText = this.add.text(0, 0, '', textStyle(32)).setOrigin(0.5);
+
     const endless = new Button(this, {
       x: 0,
       y: 0,
@@ -53,28 +84,46 @@ export class LevelSelectScene extends Phaser.Scene {
       onClick: () => this.go('Game', { level: CAMPAIGN_LENGTH + services.save.get().endless }),
     });
 
-    onLayout(this, (w, h) => {
+    const place = (): void => {
+      const w = this.scale.width;
+      const h = this.scale.height;
       const ins = safeInsets(this);
       const top = ins.top;
       backdrop.layout(w, h);
       back.setPosition(62 + ins.left, top + 62);
       title.setPosition(w / 2, top + 62);
-      // Wide screens get a 10-wide grid (3 rows) instead of 5-wide (6 rows).
       const perRow = w > h * 1.05 ? PER_ROW * 2 : PER_ROW;
       const cell = Math.min(150, (w - ins.left - ins.right - 60) / perRow);
-      const rows = Math.ceil(CAMPAIGN_LENGTH / perRow);
-      const avail = h - top - 340;
+      const rows = Math.ceil(PER_PAGE / perRow);
+      const avail = h - top - 420;
       const pitchY = Math.min(cell + 40, avail / rows);
-      const startY = top + 170 + (perRow > PER_ROW ? 60 : 0);
+      const startY = top + 170;
       const scale = Math.min(1.2, (pitchY - 30) / 112, cell / 120);
+      const start = page * PER_PAGE;
       cells.forEach(({ btn, stars }, i) => {
-        const x = w / 2 + ((i % perRow) - (perRow - 1) / 2) * cell;
-        const y = startY + Math.floor(i / perRow) * pitchY;
+        const onPage = i >= start && i < start + PER_PAGE;
+        btn.setVisible(onPage);
+        if (!onPage) {
+          stars.forEach((s) => s.setVisible(false));
+          return;
+        }
+        const local = i - start;
+        const x = w / 2 + ((local % perRow) - (perRow - 1) / 2) * cell;
+        const y = startY + Math.floor(local / perRow) * pitchY;
         btn.setPosition(x, y).setBaseScale(scale);
-        stars.forEach((s, k) => s.setPosition(x + (k - 1) * 30 * scale, y + 62 * scale).setScale((30 * scale) / s.width));
+        const locked = i + 1 > save.unlocked;
+        stars.forEach((s, k) => {
+          s.setVisible(!locked);
+          s.setPosition(x + (k - 1) * 30 * scale, y + 62 * scale).setScale((30 * scale) / s.width);
+        });
       });
-      endless.setPosition(w / 2, startY + rows * pitchY + 30);
-    });
+      const navY = startY + rows * pitchY + 20;
+      prev.setPosition(w / 2 - 160, navY).setVisible(page > 0);
+      next.setPosition(w / 2 + 160, navY).setVisible(page < pages - 1);
+      pageText.setPosition(w / 2, navY).setText(`${page + 1} / ${pages}`);
+      endless.setPosition(w / 2, navY + 100);
+    };
+    onLayout(this, () => place());
     this.cameras.main.fadeIn(220, 143, 211, 255);
   }
 

@@ -8,7 +8,7 @@ import { platform } from './PlatformService';
 import { services } from './Services';
 
 const COPY = [
-  ['Tap a column to pick up\nits top tiles', 'Tap a column with the\nsame tile on top'],
+  ['Drag or tap the top treats', 'Drop them on a match\nor an empty column'],
   ['Nice! Pick up another stack', 'Drop it on a matching tile'],
 ];
 
@@ -28,7 +28,6 @@ export class TutorialSystem {
     private scene: Phaser.Scene,
     private view: BoardView,
     private moves: Move[],
-    private clearCount: number,
   ) {
     this.hand = scene.add.image(0, 0, 'ic_hand').setOrigin(0.3, 0.05).setDepth(1500);
     this.hand.setScale(110 / this.hand.width);
@@ -59,6 +58,13 @@ export class TutorialSystem {
   onSelected(): void {
     if (!this.active) return;
     this.phase = 1;
+    this.show();
+  }
+
+  /** Selection was put back down without a move. */
+  onCancelled(): void {
+    if (!this.active || this.phase === 0) return;
+    this.phase = 0;
     this.show();
   }
 
@@ -100,7 +106,7 @@ export class TutorialSystem {
     this.active = false;
     this.handTween?.remove();
     this.hand.setVisible(false);
-    this.say(`Stack ${this.clearCount} alike to pop them!\nClear every tile to win.`);
+    this.say('Fill each column with 12 alike.\nEmpty the tray to win.');
     services.save.update({ tutorialDone: true });
     platform.track('tutorial_completed');
     this.scene.time.delayedCall(3200, () =>

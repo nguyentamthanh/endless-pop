@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
 import { tileIconKey } from '../config/assets';
 import { textStyle } from '../config/theme';
-import { ClearEvent, GameState, Loc, MoveResult, Tile, tileId, tileType } from '../core/types';
+import { isComplete } from '../core/Board';
+import { FROST_HIDDEN_FROM, GameState, Loc, MoveResult, Tile, tileIce, tileId, tileType } from '../core/types';
 import { TileSprite } from '../entities/TileSprite';
 import { services } from '../systems/Services';
 
@@ -21,7 +22,6 @@ export interface TrayGeom {
 
 const JUMP_MS = 380;
 const STAGGER_MS = 55;
-const POP_STAGGER_MS = 45;
 const D_TILE = 10;
 const D_TRAY = 300;
 const D_FLY = 1000;
@@ -54,19 +54,25 @@ export class BoardView {
   private views = new Map<number, TileSprite>();
   private pool: TileSprite[] = [];
   private lifted: { loc: Loc; ids: number[] } | null = null;
+  private checks: Phaser.GameObjects.Text[] = [];
+  private pending: { loc: Loc; id: number; x: number; y: number; active: boolean; rejected: boolean } | null = null;
+  private hoverSlot = -1;
 
   constructor(
     private scene: Phaser.Scene,
     private state: GameState,
     private iconMap: number[],
     private onTap: (loc: Loc) => void,
+    private onDragStart: (loc: Loc) => boolean = () => false,
+    private onDrop: (from: Loc, to: Loc) => void = () => undefined,
   ) {
     this.lanes = scene.add.graphics().setDepth(2);
     this.hilite = scene.add.graphics().setDepth(3);
     state.cols.forEach((_, index) => {
       const z = scene.add.zone(0, 0, 10, 10).setInteractive();
-      z.on('pointerdown', () => this.onTap({ kind: 'col', index }));
+      z.on('pointerdown', (p: Phaser.Input.Pointer) => this.pointerDown({ kind: 'col', index }, p));
       this.zones.push(z);
+      this.checks.push(scene.add.text(0, 0, '✓', textStyle(32, '#fff27a', '#8a5a12')).setOrigin(0.5).setDepth(4).setVisible(false));
     });
     for (let index = 0; index < state.cfg.traySize; index++) {
       const bg = scene.add.image(0, 0, 'tray_slot').setDepth(D_TRAY - 2);
@@ -74,9 +80,13 @@ export class BoardView {
       const lockBadge = scene.add.text(0, 0, '', textStyle(24)).setOrigin(0.5).setDepth(D_TRAY + 51);
       const count = scene.add.text(0, 0, '', textStyle(28, '#fff27a')).setOrigin(0.5).setDepth(D_TRAY + 60);
       const zone = scene.add.zone(0, 0, 10, 10).setInteractive();
-      zone.on('pointerdown', () => this.onTap({ kind: 'tray', index }));
+      zone.on('pointerdown', (p: Phaser.Input.Pointer) => this.pointerDown({ kind: 'tray', index }, p));
       this.slots.push({ bg, lock, count, zone, lockBadge });
     }
+    this.scene.input.on('pointermove', this.pointerMove, this);
+    this.scene.input.on('pointerup', this.pointerUp, this);
+    this.scene.input.on('pointerupoutside', this.pointerUp, this);
+    this.scene.input.on('gameout', this.pointerUp, this);
   }
 
   // ---------------------------------------------------------------- layout
@@ -93,7 +103,9 @@ export class BoardView {
     this.tray = tray;
     this.drawLanes();
     this.zones.forEach((z, i) => {
-      z.setPosition(this.colX[i], (this.boardTop + this.bottomY) / 2 - 10).setSize(this.pitch, this.bottomY - this.boardTop + 40);
+      const zoneTop = this.boardTop - this.tile * 0.45;
+      const zoneH = this.bottomY - zoneTop;
+      z.setPosition(this.colX[i], zoneTop + zoneH / 2).setSize(this.pitch, zoneH).setDepth(1);
       z.input?.hitArea.setTo(0, 0, z.width, z.height);
     });
     this.slots.forEach((s, i) => {
@@ -102,7 +114,7 @@ export class BoardView {
       s.lock.setPosition(x, tray.cy - tray.slot * 0.06).setScale((tray.slot * 0.5) / s.lock.width);
       s.lockBadge.setPosition(x, tray.cy + tray.slot * 0.34);
       s.count.setPosition(x + tray.slot * 0.3, tray.cy - tray.slot * 0.36);
-      s.zone.setPosition(x, tray.cy).setSize(tray.slot + tray.gap, tray.slot + 20);
+      s.zone.setPosition(x, tray.cy).setSize(tray.slot + 8, tray.slot + 8).setDepth(2);
       s.zone.input?.hitArea.setTo(0, 0, s.zone.width, s.zone.height);
     });
     this.views.forEach((v) => v.setTileSize(this.sizeFor(this.locOf(v.tileId))));
@@ -118,10 +130,13 @@ export class BoardView {
     const g = this.lanes.clear();
     const w = this.tile + 10;
     const h = this.bottomY - this.boardTop + 12;
-    for (const x of this.colX) {
-      g.fillStyle(0xffffff, 0.16).fillRoundedRect(x - w / 2, this.boardTop - 6, w, h, 14);
-      g.lineStyle(3, 0xffffff, 0.35).strokeRoundedRect(x - w / 2, this.boardTop - 6, w, h, 14);
-    }
+    this.colX.forEach((x, i) => {
+      const done = isComplete(this.state, i);
+      g.fillStyle(done ? 0xfff27a : 0xffffff, done ? 0.28 : 0.16).fillRoundedRect(x - w / 2, this.boardTop - 6, w, h, 14);
+      g.lineStyle(done ? 5 : 3, done ? 0xffd15c : 0xffffff, done ? 0.95 : 0.35).strokeRoundedRect(x - w / 2, this.boardTop - 6, w, h, 14);
+      const mark = this.checks[i];
+      if (mark) mark.setPosition(x, this.boardTop + 18).setVisible(done).setFontSize(Math.round(this.tile * 0.42));
+    });
   }
 
   /** Lanes that would accept the lifted tiles glow softly. */
@@ -165,15 +180,15 @@ export class BoardView {
 
   /** Screen position of the tile at `index` inside a stack. */
   posOf(loc: Loc, index: number, stackLen: number): { x: number; y: number; depth: number; visible: boolean } {
+    void stackLen;
     if (loc.kind === 'col') {
       return { x: this.colX[loc.index], y: this.bottomY - this.pitch * (index + 0.5), depth: D_TILE + index, visible: true };
     }
-    const fromTop = stackLen - 1 - index;
     return {
       x: this.slotX(loc.index),
-      y: this.tray.cy + Math.min(fromTop, 2) * 5 - 2,
-      depth: D_TRAY + index,
-      visible: fromTop < 3,
+      y: this.tray.cy,
+      depth: D_TRAY,
+      visible: true,
     };
   }
 
@@ -226,13 +241,22 @@ export class BoardView {
           v.setTileSize(size);
           if (v.isFaceDown() && !faceDown) v.flipUp();
           else if (!v.isFaceDown() && faceDown) v.setFaceDown(true);
-          if (duration > 0 && (v.x !== p.x || v.y !== p.y)) {
-            this.scene.tweens.add({ targets: v, x: p.x, y: p.y, duration, ease: 'Cubic.Out' });
+          this.scene.tweens.killTweensOf(v);
+          v.setAngle(0);
+          const off =
+            Math.abs(v.x - p.x) > 1.5 ||
+            Math.abs(v.y - p.y) > 1.5 ||
+            Math.abs(v.scaleX - 1) > 0.02 ||
+            Math.abs(v.scaleY - 1) > 0.02;
+          if (duration > 0 && off) {
+            this.scene.tweens.add({ targets: v, x: p.x, y: p.y, scaleX: 1, scaleY: 1, angle: 0, duration, ease: 'Quad.Out' });
           } else {
-            v.setPosition(p.x, p.y);
+            v.setPosition(p.x, p.y).setScale(1).setAngle(0);
           }
         }
         v.setDepth(p.depth).setVisible(p.visible);
+        const showFrost = faceDown && tileIce(t) > 0 && this.state.level < FROST_HIDDEN_FROM;
+        v.setIce(tileIce(t), showFrost);
       });
     };
     this.state.cols.forEach((c, i) => place(c, { kind: 'col', index: i }, this.state.hidden[i]));
@@ -241,6 +265,7 @@ export class BoardView {
       if (!seen.has(v.tileId)) this.release(v);
     });
     this.refreshTray();
+    this.drawLanes();
   }
 
   refreshTray(lockedLabel = ''): void {
@@ -249,7 +274,7 @@ export class BoardView {
       const locked = i >= this.state.trayOpen;
       s.bg.setTint(locked ? 0x8a93a8 : 0xffffff);
       s.lock.setVisible(locked);
-      s.lockBadge.setVisible(locked).setText((s.lockBadge.getData('label') as string) ?? '');
+      s.lockBadge.setVisible(locked && i === this.state.trayOpen).setText((s.lockBadge.getData('label') as string) ?? '');
       const n = this.state.tray[i].length;
       s.count.setVisible(n > 1).setText(`×${n}`);
     });
@@ -274,10 +299,172 @@ export class BoardView {
 
   // ---------------------------------------------------------------- interactions
 
+  /** Column, or the nearest tray slot once the pointer is below the board. */
+  locAt(x: number, y: number): Loc | null {
+    if (!this.tray) return null;
+    const slot = this.tray.slot;
+    if (y >= this.bottomY - 8 && y <= this.tray.cy + slot * 0.85) {
+      const index = this.nearestSlot(x);
+      if (index >= 0) return { kind: 'tray', index };
+      return null;
+    }
+    const col = this.colX.findIndex((cx) => Math.abs(x - cx) <= this.pitch * 0.55);
+    if (col >= 0 && y >= this.boardTop - this.tile && y <= this.bottomY + 4) return { kind: 'col', index: col };
+    return null;
+  }
+
+  /** Slot whose cell contains x, or -1 outside the tray row. */
+  private nearestSlot(x: number): number {
+    const n = this.state.cfg.traySize;
+    const span = this.tray.slot + this.tray.gap;
+    if (x < this.slotX(0) - span / 2 || x > this.slotX(n - 1) + span / 2) return -1;
+    let best = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < n; i++) {
+      const d = Math.abs(x - this.slotX(i));
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  private pointerDown(loc: Loc, p: Phaser.Input.Pointer): void {
+    if (p.button > 0) return;
+    if (this.pending?.active) this.finishDrag(this.pending.x, this.pending.y);
+    this.pending = { loc, id: p.id, x: p.x, y: p.y, active: false, rejected: false };
+  }
+
+  private pointerMove(p: Phaser.Input.Pointer): void {
+    const drag = this.pending;
+    if (!drag || p.id !== drag.id || drag.rejected) return;
+    drag.x = p.x;
+    drag.y = p.y;
+    if (!p.isDown) {
+      this.finishDrag(p.x, p.y);
+      return;
+    }
+    const dx = p.x - p.downX;
+    const dy = p.y - p.downY;
+    if (!drag.active && dx * dx + dy * dy < 8 * 8 && dy < 10) return;
+    if (!drag.active) {
+      if (!this.onDragStart(drag.loc)) {
+        drag.rejected = true;
+        return;
+      }
+      drag.active = true;
+    }
+    this.dragTo(p.x, p.y);
+  }
+
+  private pointerUp(p?: Phaser.Input.Pointer): void {
+    if (!this.pending) return;
+    if (p && typeof p.id === 'number' && p.id !== this.pending.id) return;
+    this.finishDrag(p?.x ?? this.pending.x, p?.y ?? this.pending.y);
+  }
+
+  private finishDrag(x: number, y: number): void {
+    const drag = this.pending;
+    if (!drag) return;
+    this.pending = null;
+    this.hoverSlot = -1;
+    if (!drag.active) {
+      if (!drag.rejected) this.onTap(drag.loc);
+      return;
+    }
+    this.onDrop(drag.loc, this.dropLoc(x, y) ?? drag.loc);
+  }
+
+  /**
+   * The finger decides. A tile already snapped into a slot must not keep the drop stuck there
+   * once the finger is back on a column.
+   */
+  private dropLoc(px: number, py: number): Loc | null {
+    const underFinger = this.locAt(px, py);
+    if (underFinger) return underFinger;
+    const ids = this.lifted?.ids ?? [];
+    const top = ids.length ? this.views.get(ids[ids.length - 1]) : undefined;
+    if (!top) return null;
+    return this.locAt(top.x, top.y + top.size * 0.2);
+  }
+
+  /** Tray takes one tile. That tile locks to the slot; the rest snap straight back onto the column. */
+  private dragTo(px: number, py: number): void {
+    const ids = this.lifted?.ids ?? [];
+    if (!ids.length) return;
+    const aim = this.locAt(px, py);
+    const overTray = aim?.kind === 'tray';
+    const flying = overTray ? ids.slice(-1) : ids;
+    const parked = overTray ? ids.slice(0, -1) : [];
+    parked.forEach((id) => this.seat(id, 0));
+    if (!overTray) this.hoverSlot = -1;
+    const n = flying.length;
+    flying.forEach((id, i) => {
+      const v = this.views.get(id);
+      if (!v) return;
+      const fromTop = n - 1 - i;
+      if (overTray && aim) {
+        const p = this.posOf(aim, 0, 1);
+        const size = this.sizeFor({ loc: aim });
+        v.setDepth(D_TRAY + 5).setAngle(0);
+        if (v.size !== size) v.setTileSize(size);
+        const entered = this.hoverSlot !== aim.index;
+        this.hoverSlot = aim.index;
+        if (entered) {
+          this.scene.tweens.killTweensOf(v);
+          this.scene.tweens.add({
+            targets: v,
+            x: p.x,
+            y: p.y,
+            scaleX: 1,
+            scaleY: 1,
+            angle: 0,
+            duration: 90,
+            ease: 'Back.Out',
+            onComplete: () => v.setPosition(p.x, p.y).setScale(1).setAngle(0),
+          });
+        } else if (!this.scene.tweens.isTweening(v)) {
+          v.setPosition(p.x, p.y).setScale(1).setAngle(0);
+        }
+        return;
+      }
+      this.scene.tweens.killTweensOf(v);
+      if (this.lifted?.loc.kind === 'col' && v.size !== this.tile) v.setTileSize(this.tile);
+      v.setDepth(D_FLY + i).setAngle(0).setScale(1.04);
+      v.setPosition(px, py - this.tile * 0.12 - fromTop * this.pitch * 0.82);
+    });
+  }
+
+  private seat(id: number, duration: number): void {
+    const v = this.views.get(id);
+    if (!v) return;
+    const place = this.locOf(id);
+    const stack = place.loc.kind === 'col' ? this.state.cols[place.loc.index] : this.state.tray[place.loc.index];
+    const p = this.posOf(place.loc, place.index, stack.length);
+    this.scene.tweens.killTweensOf(v);
+    v.setAngle(0).setDepth(p.depth).setVisible(p.visible);
+    if (duration <= 0) {
+      v.setPosition(p.x, p.y).setScale(1);
+      return;
+    }
+    this.scene.tweens.add({
+      targets: v,
+      x: p.x,
+      y: p.y,
+      scaleX: 1,
+      scaleY: 1,
+      angle: 0,
+      duration,
+      ease: 'Quad.Out',
+      onComplete: () => v.setPosition(p.x, p.y).setScale(1).setAngle(0),
+    });
+  }
+
   lift(loc: Loc, n: number): void {
     this.drop();
     const stack = loc.kind === 'col' ? this.state.cols[loc.index] : this.state.tray[loc.index];
-    const tiles = loc.kind === 'col' ? stack.slice(stack.length - n) : stack.slice(-1);
+    const tiles = stack.slice(-n);
     const ids = tiles.map(tileId);
     this.lifted = { loc, ids };
     const rise = loc.kind === 'col' ? this.tile * 0.28 : this.tray.slot * 0.18;
@@ -293,20 +480,14 @@ export class BoardView {
 
   drop(): void {
     if (!this.lifted) return;
-    const { loc, ids } = this.lifted;
+    const ids = this.lifted.ids;
     this.lifted = null;
-    const stack = loc.kind === 'col' ? this.state.cols[loc.index] : this.state.tray[loc.index];
-    ids.forEach((id) => {
-      const v = this.views.get(id);
-      if (!v) return;
-      v.setGlow(false);
-      const idx = stack.findIndex((t) => tileId(t) === id);
-      if (idx < 0) return;
-      const p = this.posOf(loc, idx, stack.length);
-      this.scene.tweens.killTweensOf(v);
-      this.scene.tweens.add({ targets: v, y: p.y, scaleX: 1, scaleY: 1, duration: 140, ease: 'Quad.Out' });
-    });
+    this.hoverSlot = -1;
     this.highlightTargets([]);
+    ids.forEach((id) => {
+      this.views.get(id)?.setGlow(false);
+      this.seat(id, 140);
+    });
   }
 
   shakeLifted(): void {
@@ -324,23 +505,24 @@ export class BoardView {
     if (v) this.scene.tweens.add({ targets: v, y: v.y - 10, duration: 70, yoyo: true });
   }
 
-  /** Jump → land → pop runs → flip reveals. `onClear` fires per popped run (for score/fx). */
-  async animateMove(res: MoveResult, onClear: (ev: ClearEvent, center: { x: number; y: number }) => void): Promise<void> {
+  /** Jump → land → flip the uncovered box → gold-check any column that just filled. */
+  async animateMove(res: MoveResult, onSorted: (col: number, center: { x: number; y: number }) => void): Promise<void> {
+    const moved = new Set(res.moved.map((t) => tileId(t)));
+    (this.lifted?.ids ?? []).filter((id) => !moved.has(id)).forEach((id) => this.seat(id, 0));
     this.lifted = null;
+    this.hoverSlot = -1;
     this.highlightTargets([]);
     const to = res.to;
     const toStack = to.kind === 'col' ? this.state.cols[to.index] : this.state.tray[to.index];
-    // Final resting slots of the moved tiles, as if nothing had popped yet.
-    const clearedDest = res.clears.filter((c) => to.kind === 'col' && c.col === to.index).reduce((n, c) => n + c.tiles.length, 0);
-    const landLen = toStack.length + clearedDest;
+    const landLen = toStack.length;
     const firstIndex = landLen - res.moved.length;
-    const destHidden = to.kind === 'col' ? this.state.hidden[to.index] : 0;
 
     services.audio.play('pick');
     const jumps = res.moved.map((t, i) => {
       const v = this.views.get(tileId(t));
       if (!v) return Promise.resolve();
-      v.setGlow(false).setDepth(D_FLY + i);
+      v.setGlow(false).setAngle(0).setDepth(D_FLY + i);
+      this.scene.tweens.killTweensOf(v);
       const end = this.posOf(to, firstIndex + i, landLen);
       const endSize = this.sizeFor({ loc: to });
       return this.jump(v, end.x, end.y, endSize, i * STAGGER_MS).then(() => {
@@ -359,21 +541,26 @@ export class BoardView {
     });
 
     await Promise.all(jumps);
-    // Tray stacks keep only the top tiles visible.
-    if (to.kind === 'tray') this.syncAll(120);
 
-    for (const ev of res.clears) {
-      const mid = ev.tiles[Math.floor(ev.tiles.length / 2)];
-      const mv = this.views.get(tileId(mid));
-      onClear(ev, { x: mv?.x ?? this.colX[ev.col], y: mv?.y ?? this.bottomY });
-      await Promise.all(
-        [...ev.tiles].reverse().map((t, i) => {
-          const v = this.views.get(tileId(t));
-          return v ? this.popTile(v, i * POP_STAGGER_MS) : Promise.resolve();
-        }),
-      );
+    for (const col of res.completed) {
+      onSorted(col, { x: this.colX[col], y: this.boardTop + this.tile });
+      const tiles = this.state.cols[col];
+      tiles.forEach((t, i) => {
+        const v = this.views.get(tileId(t));
+        if (!v) return;
+        this.scene.tweens.add({
+          targets: v,
+          y: v.y - 8,
+          scaleX: 1.08,
+          scaleY: 1.08,
+          duration: 160,
+          delay: i * 28,
+          yoyo: true,
+          ease: 'Quad.Out',
+        });
+      });
     }
-    if (destHidden || res.clears.length) await delay(this.scene, 60);
+    if (res.revealed.length || res.completed.length) await delay(this.scene, 80);
     this.syncAll(160);
     await delay(this.scene, 180);
   }
@@ -403,44 +590,21 @@ export class BoardView {
             if (startSize !== endSize) v.setTileSize(startSize + (endSize - startSize) * t);
           },
           onComplete: () => {
-            v.setAngle(0);
-            v.setScale(1.18, 0.8);
+            v.setTileSize(endSize);
+            v.setAngle(0).setPosition(x, y).setScale(1);
             services.audio.play('land');
-            this.scene.tweens.add({ targets: v, scaleX: 1, scaleY: 1, duration: 260, ease: 'Back.Out', onComplete: () => resolve() });
+            resolve();
           },
         });
       });
     });
   }
 
-  private popTile(v: TileSprite, wait: number): Promise<void> {
-    return new Promise((resolve) => {
-      this.scene.tweens.add({
-        targets: v,
-        scale: 1.3,
-        delay: wait,
-        duration: 110,
-        ease: 'Quad.Out',
-        onStart: () => v.setDepth(D_FLY + 50),
-        onComplete: () => {
-          this.scene.events.emit('tile-pop', v.x, v.y);
-          this.scene.tweens.add({
-            targets: v,
-            scale: 0,
-            alpha: 0,
-            duration: 140,
-            ease: 'Back.In',
-            onComplete: () => {
-              this.release(v);
-              resolve();
-            },
-          });
-        },
-      });
-    });
-  }
-
   destroy(): void {
+    this.scene.input.off('pointermove', this.pointerMove, this);
+    this.scene.input.off('pointerup', this.pointerUp, this);
+    this.scene.input.off('pointerupoutside', this.pointerUp, this);
+    this.scene.input.off('gameout', this.pointerUp, this);
     this.views.forEach((v) => v.destroy());
     this.pool.forEach((v) => v.destroy());
     this.views.clear();

@@ -5,13 +5,13 @@ Cơ chế chơi được xây dựng theo video tham chiếu (màn "萌宠跳跳
 
 ## Cách chơi
 
-- Bàn chơi gồm các cột ô xếp chồng. Từ **level 4** trở đi, phần dưới mỗi cột là các ô úp dấu **"?"** (không biết hình gì phía sau); ô úp tự lật khi trở thành ô trên cùng. Level 1–3 chơi hoàn toàn ngửa.
-- **Chạm một cột (hoặc ô khay)** để nhấc cả nhóm ô cùng loại đang nằm trên cùng, rồi **chạm cột đích** để thả.
-  Đích hợp lệ: cột có ô trên cùng cùng loại, cột trống, ô khay trống hoặc ô khay đang giữ cùng loại.
-- Khi một cột có **từ N ô cùng loại liền nhau ở trên cùng** (N đặt theo từng màn, 4 đến 10), cả nhóm nổ và cộng điểm. Nổ xong làm lộ ô úp, nếu ô vừa lật tạo thêm nhóm đủ N thì nổ tiếp (combo).
-- **Thắng:** dọn sạch bàn và khay. **Thua:** hết nước đi hợp lệ, hoặc bàn đã bí (không thể thắng nữa) thì game báo "Out of moves!" và ra thẳng màn thua với nút Retry. Booster chỉ dùng được khi còn nước đi, để tránh rơi vào thế bí.
-- Booster: **Undo** (3 lần/màn), **Shuffle** (1), **Extra Slot** mở ô khay thứ 4 (1). Hết lượt có thể mua bằng coin. Dùng tối đa 0 / 2 booster sẽ được 3 / 2 sao, nhiều hơn được 1 sao.
-- 30 màn chiến dịch, cùng chế độ **Endless** sinh màn theo seed. Endless **mở ngay từ đầu** (nút hồng "Endless" ở màn chọn level) và có tiến trình riêng, không ảnh hưởng chiến dịch. Mọi màn đều được chứng minh là giải được (xem `Solver`).
+- Bàn chơi có **8 cột**, mỗi cột chứa tối đa **12** ô. Khay dưới có 4 ô, lúc đầu mở 2; mỗi ô khay chỉ giữ **một** viên.
+- **Chạm hoặc kéo** một cột để nhấc cả nhóm ô cùng loại đang ngửa, không đóng băng, ở trên cùng, rồi thả lên cột đích (không đủ chỗ thì nước đi không hợp lệ). Đích hợp lệ: cột có ô trên cùng cùng loại, hoặc cột trống. Cột đã cùng một loại không được đổ vào cột trống.
+- **Chạm ô khay trống** để gửi đúng một viên trên cùng vào đó. Chạm viên trong khay rồi chạm cột để trả về.
+- Cột đủ 12 ô cùng loại được đánh dấu hoàn thành và làm tan một lớp băng đang hiện. Mở hộp **"?"** làm nứt một lớp băng hiện trên cột đó và hai cột bên, rồi lật ô. Hộp phủ sương vẫn đóng băng sau khi lật.
+- **Thắng:** khay trống và mọi cột trống hoặc đủ 12 ô cùng loại. **Thua:** hết nước đi và không còn booster cứu (Undo, thêm ô khay, hoặc búa). Game báo "Out of space!".
+- Booster: **Undo** (3), **Hammer** từ level 51 (1, chạm rồi chọn cột có băng), **Extra Slot** (1, mở thêm một ô khay). Hết lượt mua bằng coin. Dùng 0 / tối đa 2 / nhiều hơn được 3 / 2 / 1 sao.
+- 150 màn chiến dịch, cùng **Endless** sinh tiếp cùng công thức. Endless mở ngay từ đầu. Mỗi màn được thử giải trong 1,5 giây (`Solver`); nếu hết giờ vẫn chơi được.
 
 Phân tích video và các điểm đã xác nhận / giả định: [`docs/GAMEPLAY_ANALYSIS.md`](docs/GAMEPLAY_ANALYSIS.md).
 
@@ -44,7 +44,7 @@ npm test
 
 ```
 src/game/core        Luật chơi thuần TypeScript (Board, Rules, Solver, LevelGenerator, rng). Không phụ thuộc Phaser.
-src/game/config      levels.ts (30 màn, chỉnh dạng bảng), assets.ts, theme.ts
+src/game/config      levels.ts (150 màn theo seed), assets.ts, theme.ts
 src/game/systems     GameplaySystem (luật + undo + booster), ScoreSystem, LevelSystem, SaveSystem,
                      AudioSystem (tổng hợp bằng Web Audio), TutorialSystem, FxSystem, TextureFactory
 src/game/scenes      Boot, Preload, Menu, LevelSelect, Game, Pause, Result
@@ -56,7 +56,7 @@ tools/               asset-jobs.mjs (prompt Gemini + cách cắt) và process-as
 tests/               vitest cho luật chơi, solver, sinh màn, điểm, undo, booster
 ```
 
-Chỉnh độ khó: sửa bảng `ROWS` trong `src/game/config/levels.ts` (số cột, số loại ô, N, độ cao, số hàng ô úp, ô khay…), rồi chạy `npm test` để xác nhận mọi màn vẫn giải được.
+Độ khó theo số level trong `LevelGenerator` (số loại, hộp úp, băng, sương). Seed mỗi màn là `id * 7919 + 13`.
 
 ## Asset
 

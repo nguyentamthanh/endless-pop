@@ -1,132 +1,111 @@
 import { describe, expect, it } from 'vitest';
-import { cloneState, isWin, tileCount, topRunLength } from '../src/game/core/Board';
-import { buildState, generateLevel } from '../src/game/core/LevelGenerator';
-import { applyMove, hasLegalMove, legalMoves, moveCount, shuffleFaceUp } from '../src/game/core/Rules';
-import { mulberry32 } from '../src/game/core/rng';
-import { solve } from '../src/game/core/Solver';
-import { GameState, Loc, makeTile, tileType } from '../src/game/core/types';
-import { CAMPAIGN, endlessDef } from '../src/game/config/levels';
+import { isComplete, isWin, topRunLength } from '../src/game/core/Board';
+import { generateLevel } from '../src/game/core/LevelGenerator';
+import { applyMove, moveCount } from '../src/game/core/Rules';
+import { levelDef } from '../src/game/config/levels';
+import { GameState, Loc, Tile, makeTile, tileIce, tileType, withIce } from '../src/game/core/types';
 
 let nextId = 1;
-const col = (...types: number[]) => types.map((t) => makeTile(nextId++, t));
 const C = (index: number): Loc => ({ kind: 'col', index });
 const T = (index: number): Loc => ({ kind: 'tray', index });
 
-function state(cols: number[][], hidden: number[] = [], opts: Partial<GameState['cfg']> = {}): GameState {
+function state(
+  cols: number[][],
+  hidden: number[] = [],
+  ice: Array<[number, number, number]> = [],
+  extra: Partial<GameState> = {},
+): GameState {
+  const built = cols.map((c) => c.map((t) => makeTile(nextId++, t)));
+  for (const [ci, ri, layers] of ice) built[ci][ri] = withIce(built[ci][ri], layers);
   return {
-    cols: cols.map((c) => col(...c)),
+    cols: built,
     hidden: cols.map((_, i) => hidden[i] ?? 0),
     tray: [[], [], [], []],
-    trayOpen: 3,
-    cfg: { maxHeight: 8, clearCount: 4, trayCapacity: 3, traySize: 4, ...opts },
+    trayOpen: 2,
+    moves: 0,
+    counts: [],
+    level: 1,
+    cfg: { maxHeight: 12, traySize: 4 },
+    ...extra,
   };
 }
 
-describe('rules', () => {
-  it('lifts the whole same-type run and stops at face-down tiles', () => {
-    const s = state([[1, 1, 2, 2, 2]], [0]);
-    expect(topRunLength(s, 0)).toBe(3);
-    const h = state([[2, 2, 2]], [2]);
-    expect(topRunLength(h, 0)).toBe(1);
+const types = (tiles: Tile[]) => tiles.map(tileType);
+
+describe('sort rules', () => {
+  it('stops a top run at a hidden or frozen tile', () => {
+    expect(topRunLength(state([[1, 1, 2, 2, 2]]), 0)).toBe(3);
+    expect(topRunLength(state([[2, 2, 2]], [2]), 0)).toBe(1);
+    expect(topRunLength(state([[1, 1]], [], [[0, 1, 1]]), 0)).toBe(0);
   });
 
-  it('only moves onto a matching top, an empty column or a compatible tray slot', () => {
-    const s = state([[0, 1], [2, 1], [3], []]);
-    expect(moveCount(s, C(0), C(1))).toBe(1);
-    expect(moveCount(s, C(0), C(2))).toBe(0);
-    expect(moveCount(s, C(0), C(3))).toBe(1);
+  it('sends one tile to an empty open tray slot', () => {
+    const s = state([[1, 1, 1], []]);
     expect(moveCount(s, C(0), T(0))).toBe(1);
-    expect(moveCount(s, C(0), T(3))).toBe(0); // locked slot
-    expect(moveCount(s, C(0), C(0))).toBe(0);
-  });
-
-  it('moves only what fits when the target column is nearly full', () => {
-    const s = state([[1, 1, 1], [0, 0, 0, 0, 0, 0, 1]], [], { maxHeight: 8, clearCount: 9 });
-    expect(moveCount(s, C(0), C(1))).toBe(1);
-    const res = applyMove(s, C(0), C(1));
-    expect(res.moved.length).toBe(1);
-    expect(s.cols[0].length).toBe(2);
-  });
-
-  it('pops a run of N on landing and reveals the tile underneath', () => {
-    const s = state([[1, 1], [3, 0, 1, 1]], [0, 2]);
-    const res = applyMove(s, C(0), C(1));
-    expect(res.clears).toHaveLength(1);
-    expect(res.clears[0].tiles.map(tileType)).toEqual([1, 1, 1, 1]);
-    expect(s.cols[1].map(tileType)).toEqual([3, 0]);
-    expect(s.hidden[1]).toBe(1);
-    expect(res.revealed.map(tileType)).toEqual([0]);
-  });
-
-  it('reveals the new top of the source column', () => {
-    const s = state([[2, 3, 1], [1]], [2, 0]);
-    const res = applyMove(s, C(0), C(1));
-    expect(s.hidden[0]).toBe(1);
-    expect(res.revealed.map(tileType)).toEqual([3]);
-  });
-
-  it('tray slots hold one type up to capacity and give back their whole content', () => {
-    const s = state([[1, 1], [1], [0]]);
+    expect(moveCount(s, C(0), T(2))).toBe(0);
     applyMove(s, C(0), T(0));
-    expect(s.tray[0].length).toBe(2);
-    expect(moveCount(s, C(1), T(0))).toBe(1);
-    expect(moveCount(s, C(2), T(0))).toBe(0);
-    applyMove(s, C(1), T(0));
-    expect(moveCount(s, C(0), T(0))).toBe(0); // column empty
-    expect(moveCount(s, T(0), C(0))).toBe(3);
+    expect(s.tray[0]).toHaveLength(1);
+    expect(s.cols[0]).toHaveLength(2);
+    expect(moveCount(s, C(0), T(0))).toBe(0);
+    expect(moveCount(s, T(0), C(1))).toBe(1);
   });
 
-  it('detects a lost position', () => {
-    const s = state([[0, 1], [2, 3]], [], { maxHeight: 2 });
-    s.tray = [col(4), col(5), col(6), []];
-    expect(hasLegalMove(s)).toBe(false);
+  it('moves a whole column run or nothing', () => {
+    const blocked = state([[1, 1, 1], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]]);
+    expect(moveCount(blocked, C(0), C(1))).toBe(0);
+    expect(blocked.cols[0]).toHaveLength(3);
   });
 
-  it('wins when everything is cleared', () => {
-    const s = state([[1, 1], [1, 1]]);
+  it('refuses to dump a sorted column into an empty one', () => {
+    expect(moveCount(state([[1, 1], []]), C(0), C(1))).toBe(0);
+    const mixed = state([[2, 1, 1], []]);
+    expect(moveCount(mixed, C(0), C(1))).toBe(2);
+    applyMove(mixed, C(0), C(1));
+    expect(types(mixed.cols[0])).toEqual([2]);
+    expect(types(mixed.cols[1])).toEqual([1, 1]);
+  });
+
+  it('cracks visible ice beside a newly opened box, then reveals', () => {
+    const s = state([[9, 1], [2], []], [1, 0, 0], [[1, 0, 2]]);
+    const res = applyMove(s, C(0), C(2));
+    expect(types(res.revealed)).toEqual([9]);
+    expect(s.hidden[0]).toBe(0);
+    expect(tileIce(s.cols[1][0])).toBe(1);
+  });
+
+  it('keeps frost on a box that just flipped', () => {
+    const s = state([[4, 1], []], [1, 0], [[0, 0, 1]]);
     applyMove(s, C(0), C(1));
-    expect(isWin(s)).toBe(true);
+    expect(s.hidden[0]).toBe(0);
+    expect(tileIce(s.cols[0][0])).toBe(1);
   });
 
-  it('shuffle keeps tile counts and face-down tiles', () => {
-    const s = buildState(CAMPAIGN[9], 1234);
-    const next = shuffleFaceUp(s, mulberry32(7))!;
-    expect(next).not.toBeNull();
-    expect(tileCount(next)).toBe(tileCount(s));
-    next.cols.forEach((c, i) => {
-      expect(c.length).toBe(s.cols[i].length);
-      expect(c.slice(0, s.hidden[i])).toEqual(s.cols[i].slice(0, s.hidden[i]));
-    });
+  it('melts one visible ice layer for each column just completed', () => {
+    const s = state([Array(11).fill(1), [2], [1]], [], [[1, 0, 1]]);
+    const res = applyMove(s, C(2), C(0));
+    expect(res.completed).toEqual([0]);
+    expect(isComplete(s, 0)).toBe(true);
+    expect(tileIce(s.cols[1][0])).toBe(0);
+  });
+
+  it('wins when the tray is empty and every column is empty or full of one treat', () => {
+    const won = state([[1, 1], [], [2, 2]], [], [], { cfg: { maxHeight: 2, traySize: 4 } });
+    expect(isWin(won)).toBe(true);
+    won.tray[0] = [makeTile(900, 3)];
+    expect(isWin(won)).toBe(false);
+    const hiddenFull = state([[1, 1]], [1], [], { cfg: { maxHeight: 2, traySize: 4 } });
+    expect(isWin(hiddenFull)).toBe(true);
+    expect(isComplete(hiddenFull, 0)).toBe(false);
   });
 });
 
-describe('levels', () => {
-  it('generation is deterministic', () => {
-    const a = generateLevel(CAMPAIGN[4]);
-    const b = generateLevel(CAMPAIGN[4]);
-    expect(a.state.cols).toEqual(b.state.cols);
-    expect(a.seedUsed).toBe(b.seedUsed);
-  });
-
-  it.each(CAMPAIGN.map((d) => [d.id, d] as const))('campaign level %i is solvable', (_id, def) => {
-    const lvl = generateLevel(def);
-    expect(lvl.solution, `level ${def.id} has no solution`).not.toBeNull();
-    // Replay the solution with the real rules to make sure solver and rules agree.
-    const s = cloneState(lvl.state);
-    for (const [from, to] of lvl.solution!) applyMove(s, from, to);
-    expect(isWin(s)).toBe(true);
-    expect(tileCount(lvl.state)).toBe(def.types * def.groupsPerType * def.clearCount);
-    expect(legalMoves(lvl.state).length).toBeGreaterThan(0);
-  });
-
-  it.each([31, 37, 52, 99])('endless level %i is solvable', (id) => {
-    const lvl = generateLevel(endlessDef(id));
-    expect(lvl.solution).not.toBeNull();
-  });
-
-  it('solver reports no solution for a dead end', () => {
-    const s = state([[0, 1], [2, 3]], [], { maxHeight: 2 });
-    s.tray = [col(4), col(5), col(6), []];
-    expect(solve(s).solution).toBeNull();
+describe('level recipe', () => {
+  it('builds an 8-column board with two open tray slots', () => {
+    const lvl = generateLevel(levelDef(1));
+    expect(lvl.state.cols).toHaveLength(8);
+    expect(lvl.state.cfg.maxHeight).toBe(12);
+    expect(lvl.state.trayOpen).toBe(2);
+    const n = lvl.state.cols.reduce((sum, c) => sum + c.length, 0);
+    expect(n % 12).toBe(0);
   });
 });

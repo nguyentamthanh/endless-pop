@@ -46,22 +46,39 @@ export class Button extends Phaser.GameObjects.Container {
     this.add(this.bg);
     if (opts.icon) {
       const size = h * (opts.iconScale ?? 0.6);
-      this.iconImg = scene.add.image(opts.label ? -w / 2 + h * 0.55 : 0, -h * 0.04, opts.icon);
+      this.iconImg = scene.add.image(0, 0, opts.icon);
       this.iconImg.setScale(size / Math.max(this.iconImg.width, this.iconImg.height));
       this.add(this.iconImg);
     }
     if (opts.label) {
       const fs = opts.fontSize ?? Math.round(h * 0.42);
-      const offset = opts.icon ? h * 0.3 : 0;
-      this.labelText = scene.add.text(offset, -h * 0.05, opts.label, textStyle(fs)).setOrigin(0.5);
+      this.labelText = scene.add.text(0, 0, opts.label, textStyle(fs)).setOrigin(0.5);
       this.add(this.labelText);
     }
+    this.centerContents();
     this.setSize(w, h);
     this.setInteractive({ useHandCursor: true });
     this.on('pointerdown', this.press, this);
     this.on('pointerup', this.release, this);
     this.on('pointerout', this.cancel, this);
     scene.add.existing(this);
+  }
+
+  /** Label and icon share the button's midpoint so the caption sits in the face, not above it. */
+  private centerContents(): void {
+    this.iconImg?.setY(0);
+    this.labelText?.setY(0).setOrigin(0.5).setShadow(0, 0, '#000', 0);
+    if (!this.iconImg || !this.labelText) {
+      this.iconImg?.setX(0);
+      this.labelText?.setX(0);
+      return;
+    }
+    const gap = this.opts.height * 0.08;
+    const iconW = this.iconImg.displayWidth;
+    const textW = this.labelText.width;
+    const total = iconW + gap + textW;
+    this.iconImg.setX(-total / 2 + iconW / 2);
+    this.labelText.setX(total / 2 - textW / 2);
   }
 
   /** Layout scale; press animations are relative to it. */
@@ -73,6 +90,7 @@ export class Button extends Phaser.GameObjects.Container {
 
   setLabel(text: string): this {
     this.labelText?.setText(text);
+    this.centerContents();
     return this;
   }
 
@@ -99,7 +117,7 @@ export class Button extends Phaser.GameObjects.Container {
     if (!this.badge) {
       const r = this.opts.height * 0.22;
       const circle = this.scene.add.graphics();
-      this.badgeText = this.scene.add.text(0, -1, '', textStyle(Math.round(r * 1.1))).setOrigin(0.5);
+      this.badgeText = this.scene.add.text(0, 0, '', textStyle(Math.round(r * 1.1))).setOrigin(0.5);
       this.badge = this.scene.add.container(this.opts.width / 2 - r * 0.6, -this.opts.height / 2 + r * 0.6, [circle, this.badgeText]);
       this.badge.setData('r', r).setData('g', circle);
       this.add(this.badge);
